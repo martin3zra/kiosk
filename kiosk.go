@@ -60,6 +60,13 @@ func Register(router *routing.Router, opts Options) {
 			rg2.POST("/addons", addonsCreate(opts.DB))
 			rg2.POST("/companies/:id/addons", companiesAttachAddon(opts.DB))
 			rg2.DELETE("/companies/:id/addons/:addonId", companiesDetachAddon(opts.DB))
+
+			rg2.GET("/users", usersIndex(opts.DB))
+			rg2.POST("/users", usersCreate(opts.DB))
+			rg2.PUT("/users/:id", usersUpdate(opts.DB))
+
+			rg2.POST("/impersonate/:id", impersonateStart(opts.DB, opts.Allowlist))
+			rg2.DELETE("/impersonate", impersonateStop(opts.DB))
 		})
 	})
 }

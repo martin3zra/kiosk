@@ -124,3 +124,25 @@ type attachAddonForm struct {
 func (f *attachAddonForm) Rules() map[string]any {
 	return map[string]any{"addon_id": "required"}
 }
+
+type createUserForm struct {
+	support.FormRequest
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
+func (f *createUserForm) Rules() map[string]any {
+	return map[string]any{"name": "required", "email": "required"}
+}
+
+type updateUserForm struct {
+	support.FormRequest
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
+func (f *updateUserForm) Rules() map[string]any {
+	return map[string]any{"name": "required", "email": "required"}
+}
