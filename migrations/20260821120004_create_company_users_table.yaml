@@ -1,0 +1,16 @@
+up:
+  company_user:
+    action: create
+    table: company_users
+    columns:
+      id: id
+      company_id: bigint
+      user_id: bigint
+      role: string:50
+      created_at: timestamp useCurrent
+      updated_at: timestamp nullable
+
+down:
+  company_user:
+    action: drop
+    table: company_users

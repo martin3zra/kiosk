@@ -1,0 +1,15 @@
+up:
+  company_addon:
+    action: create
+    table: company_addons
+    columns:
+      id: id
+      company_id: bigint
+      addon_id: bigint
+      created_at: timestamp useCurrent
+      updated_at: timestamp nullable
+
+down:
+  company_addon:
+    action: drop
+    table: company_addons

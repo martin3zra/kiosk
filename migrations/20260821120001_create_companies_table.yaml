@@ -1,0 +1,18 @@
+up:
+  company:
+    action: create
+    table: companies
+    columns:
+      id: id
+      uuid: string:36
+      name: string:255
+      status: string:20
+      plan_id: bigint nullable
+      created_at: timestamp useCurrent
+      updated_at: timestamp nullable
+      deleted_at: timestamp nullable
+
+down:
+  company:
+    action: drop
+    table: companies

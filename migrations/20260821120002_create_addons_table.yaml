@@ -1,0 +1,19 @@
+up:
+  addon:
+    action: create
+    table: addons
+    columns:
+      id: id
+      uuid: string:36
+      name: string:255
+      price_cents: bigint
+      currency: string:3
+      active_from: timestamp nullable
+      active_until: timestamp nullable
+      created_at: timestamp useCurrent
+      updated_at: timestamp nullable
+
+down:
+  addon:
+    action: drop
+    table: addons
