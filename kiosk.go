@@ -44,7 +44,7 @@ func Register(router *routing.Router, opts Options) {
 
 	router.GroupPrefix("/kiosks", func(rg *routing.Router) {
 		rg.GroupWithMiddleware(mws, func(rg2 *routing.Router) {
-			rg2.GET("", dashboardHandler)
+			rg2.GET("", dashboardHandler(opts.DB))
 
 			rg2.GET("/companies", companiesIndex(opts.DB))
 			rg2.POST("/companies", companiesCreate(opts.DB))
@@ -71,13 +71,60 @@ func Register(router *routing.Router, opts Options) {
 	})
 }
 
-// dashboardHandler is a placeholder — proves the routing/middleware/allowlist
-// chain end to end before the real dashboard (and its React page) exist.
-func dashboardHandler(ctx *routing.Context) {
-	ctx.JSON(http.StatusOK, map[string]any{
-		"ok":      true,
-		"message": "kiosk is wired",
-	})
+// dashboardHandler renders Kiosk/Dashboard.tsx: company/plan/user counts and
+// a companies table with each company's plan name resolved.
+func dashboardHandler(db *playsql.DB) routing.HandlerFunc {
+	return func(ctx *routing.Context) {
+		reqCtx := ctx.Request.Context()
+
+		var companies []companyModel
+		if err := db.Model(&companyModel{}).OrderBy("name", playsql.Asc).Get(reqCtx, &companies); err != nil {
+			ctx.Error(err)
+			return
+		}
+
+		var plans []planModel
+		if err := db.Model(&planModel{}).Get(reqCtx, &plans); err != nil {
+			ctx.Error(err)
+			return
+		}
+		planNames := make(map[int]string, len(plans))
+		for _, p := range plans {
+			planNames[p.ID] = p.Name
+		}
+
+		userCount, err := db.Model(&kioskUserModel{}).Count(reqCtx)
+		if err != nil {
+			ctx.Error(err)
+			return
+		}
+
+		type companyRow struct {
+			ID     int    `json:"id"`
+			Name   string `json:"name"`
+			Status string `json:"status"`
+			Plan   string `json:"plan"`
+		}
+		rows := make([]companyRow, len(companies))
+		for i, c := range companies {
+			plan := "—"
+			if c.PlanID != nil {
+				if name, ok := planNames[*c.PlanID]; ok {
+					plan = name
+				}
+			}
+			rows[i] = companyRow{ID: c.ID, Name: c.Name, Status: c.Status, Plan: plan}
+		}
+
+		ctx.Render("Kiosk/Dashboard", map[string]any{
+			"companies": rows,
+			"stats": map[string]any{
+				"companies": len(companies),
+				"plans":     len(plans),
+				"users":     userCount,
+			},
+		})
+	}
 }
 
 // allowlistMiddleware restricts access to emails present in allowlist. A
