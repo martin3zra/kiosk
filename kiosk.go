@@ -70,6 +70,17 @@ func Register(router *routing.Router, opts Options) {
 			rg2.PUT("/users/:id", usersUpdate(opts.DB))
 
 			rg2.POST("/impersonate/:id", impersonateStart(opts.DB, opts.Allowlist))
+		})
+
+		// impersonateStop is deliberately NOT behind allowlistMiddleware: by
+		// the time it's called, the session identity is the impersonated
+		// target, not the developer — allowlistMiddleware would 404 it,
+		// making impersonation impossible to stop. impersonateStop enforces
+		// its own authorization instead (it only proceeds if
+		// kiosk_original_user_id is set, which is only ever true after a
+		// successful, allowlist-gated impersonateStart), so it just needs
+		// opts.Middleware for an authenticated session, not the allowlist.
+		rg.GroupWithMiddleware(opts.Middleware, func(rg2 *routing.Router) {
 			rg2.DELETE("/impersonate", impersonateStop(opts.DB))
 		})
 	})
