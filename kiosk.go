@@ -115,7 +115,7 @@ func dashboardHandler(db *playsql.DB) routing.HandlerFunc {
 		}
 
 		type companyRow struct {
-			ID     int    `json:"id"`
+			UUID   string `json:"uuid"`
 			Name   string `json:"name"`
 			Status string `json:"status"`
 			Plan   string `json:"plan"`
@@ -128,7 +128,7 @@ func dashboardHandler(db *playsql.DB) routing.HandlerFunc {
 					plan = name
 				}
 			}
-			rows[i] = companyRow{ID: c.ID, Name: c.Name, Status: c.Status, Plan: plan}
+			rows[i] = companyRow{UUID: c.UUID, Name: c.Name, Status: c.Status, Plan: plan}
 		}
 
 		ctx.Render("Kiosk/Dashboard", map[string]any{

@@ -10,7 +10,14 @@ import (
 	"github.com/martin3zra/playsql"
 )
 
-const impersonateSessionKey = "kiosk_original_user_id"
+// ImpersonateSessionKey holds the original developer's user id in session
+// while impersonating someone — its presence is the signal that
+// impersonation is active. Exported so a host app can read it directly
+// (e.g. to show a "stop impersonating" banner) without duplicating the
+// string or depending on company_id, which answers a different question
+// (does the *current* identity have a company) than "is this session
+// currently impersonating."
+const ImpersonateSessionKey = "kiosk_original_user_id"
 
 // impersonateStart handles POST /kiosks/impersonate/:id. Besides swapping
 // the session identity, it opens an impersonation_sessions audit row and
@@ -29,7 +36,7 @@ func impersonateStart(db *playsql.DB, allowlist map[string]bool) routing.Handler
 		// Checked before even looking up the target: stacking a second
 		// impersonation is rejected regardless of who it's aimed at.
 		sess := session.GetSession(ctx.Request)
-		if sess.Get(impersonateSessionKey) != nil {
+		if sess.Get(ImpersonateSessionKey) != nil {
 			ctx.JSON(http.StatusConflict, map[string]any{"error": "already impersonating — stop first"})
 			return
 		}
@@ -73,7 +80,7 @@ func impersonateStart(db *playsql.DB, allowlist map[string]bool) routing.Handler
 		var membership companyUserModel
 		companyErr := db.Model(&companyUserModel{}).WhereEq("user_id", target.ID).First(ctx.Request.Context(), &membership)
 
-		sess.Put(impersonateSessionKey, actorID)
+		sess.Put(ImpersonateSessionKey, actorID)
 		sess.Put("user_id", target.ID)
 		sess.Put("user", sessionUserPayload(target))
 		if companyErr == nil {
@@ -93,7 +100,7 @@ func impersonateStop(db *playsql.DB) routing.HandlerFunc {
 	return func(ctx *routing.Context) {
 		sess := session.GetSession(ctx.Request)
 
-		originalID, ok := toInt(sess.Get(impersonateSessionKey))
+		originalID, ok := toInt(sess.Get(ImpersonateSessionKey))
 		if !ok {
 			ctx.JSON(http.StatusBadRequest, map[string]any{"error": "not impersonating"})
 			return
@@ -116,7 +123,7 @@ func impersonateStop(db *playsql.DB) routing.HandlerFunc {
 
 		sess.Put("user_id", original.ID)
 		sess.Put("user", sessionUserPayload(original))
-		sess.Delete(impersonateSessionKey)
+		sess.Delete(ImpersonateSessionKey)
 		sess.Delete("company_id")
 
 		ctx.JSON(http.StatusOK, map[string]any{"ok": true})

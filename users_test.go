@@ -112,8 +112,8 @@ func TestImpersonateLifecycle(t *testing.T) {
 	if got, ok := toInt(sess.Get("user_id")); !ok || got != target.ID {
 		t.Fatalf("expected session user_id to become target's id, got %v", sess.Get("user_id"))
 	}
-	if got, ok := toInt(sess.Get(impersonateSessionKey)); !ok || got != developer.ID {
-		t.Fatalf("expected original id stashed under %q, got %v", impersonateSessionKey, sess.Get(impersonateSessionKey))
+	if got, ok := toInt(sess.Get(ImpersonateSessionKey)); !ok || got != developer.ID {
+		t.Fatalf("expected original id stashed under %q, got %v", ImpersonateSessionKey, sess.Get(ImpersonateSessionKey))
 	}
 
 	// Can't stack a second impersonation.
@@ -153,8 +153,8 @@ func TestImpersonateLifecycle(t *testing.T) {
 	if got, ok := toInt(sess.Get("user_id")); !ok || got != developer.ID {
 		t.Fatalf("expected session user_id restored to developer's id, got %v", sess.Get("user_id"))
 	}
-	if sess.Get(impersonateSessionKey) != nil {
-		t.Fatalf("expected %q cleared after stop, still %v", impersonateSessionKey, sess.Get(impersonateSessionKey))
+	if sess.Get(ImpersonateSessionKey) != nil {
+		t.Fatalf("expected %q cleared after stop, still %v", ImpersonateSessionKey, sess.Get(ImpersonateSessionKey))
 	}
 	if sess.Get("company_id") != nil {
 		t.Fatalf("expected company_id cleared after stop, still %v", sess.Get("company_id"))
