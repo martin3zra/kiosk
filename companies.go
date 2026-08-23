@@ -21,12 +21,12 @@ func companiesIndex(db *playsql.DB) routing.HandlerFunc {
 
 func companiesShow(db *playsql.DB) routing.HandlerFunc {
 	return func(ctx *routing.Context) {
-		id, ok := paramInt(ctx, "id")
+		id, ok := paramUUID(ctx, "id")
 		if !ok {
 			return
 		}
 		var row companyModel
-		if err := db.Model(&companyModel{}).Find(ctx.Request.Context(), &row, id); err != nil {
+		if err := db.Model(&companyModel{}).WhereEq("uuid", id).First(ctx.Request.Context(), &row); err != nil {
 			ctx.Error(err)
 			return
 		}
@@ -53,7 +53,7 @@ func companiesCreate(db *playsql.DB) routing.HandlerFunc {
 
 func companiesUpdateStatus(db *playsql.DB) routing.HandlerFunc {
 	return routing.WithRequest(func(ctx *routing.Context, form *updateCompanyStatusForm) {
-		id, ok := paramInt(ctx, "id")
+		id, ok := paramUUID(ctx, "id")
 		if !ok {
 			return
 		}
@@ -61,7 +61,7 @@ func companiesUpdateStatus(db *playsql.DB) routing.HandlerFunc {
 			ctx.JSON(http.StatusUnprocessableEntity, map[string]any{"error": "status must be active or suspended"})
 			return
 		}
-		_, err := db.Model(&companyModel{}).WhereEq("id", id).Update(ctx.Request.Context(), map[string]any{
+		_, err := db.Model(&companyModel{}).WhereEq("uuid", id).Update(ctx.Request.Context(), map[string]any{
 			"status": form.Status,
 		})
 		if err != nil {
@@ -74,11 +74,11 @@ func companiesUpdateStatus(db *playsql.DB) routing.HandlerFunc {
 
 func companiesUpdatePlan(db *playsql.DB) routing.HandlerFunc {
 	return routing.WithRequest(func(ctx *routing.Context, form *updateCompanyPlanForm) {
-		id, ok := paramInt(ctx, "id")
+		id, ok := paramUUID(ctx, "id")
 		if !ok {
 			return
 		}
-		_, err := db.Model(&companyModel{}).WhereEq("id", id).Update(ctx.Request.Context(), map[string]any{
+		_, err := db.Model(&companyModel{}).WhereEq("uuid", id).Update(ctx.Request.Context(), map[string]any{
 			"plan_id": form.PlanID,
 		})
 		if err != nil {

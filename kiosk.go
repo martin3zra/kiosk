@@ -52,6 +52,10 @@ func Register(router *routing.Router, opts Options) {
 			rg2.PUT("/companies/:id/status", companiesUpdateStatus(opts.DB))
 			rg2.PUT("/companies/:id/plan", companiesUpdatePlan(opts.DB))
 
+			rg2.GET("/companies/:id/users", companiesUsersIndex(opts.DB))
+			rg2.POST("/companies/:id/users", companiesAttachUser(opts.DB, opts.Allowlist))
+			rg2.DELETE("/companies/:id/users/:userId", companiesDetachUser(opts.DB))
+
 			rg2.GET("/plans", plansIndex(opts.DB))
 			rg2.POST("/plans", plansCreate(opts.DB))
 			rg2.PUT("/plans/:id", plansUpdate(opts.DB))

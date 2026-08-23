@@ -71,3 +71,20 @@ type companyUserModel struct {
 }
 
 func (companyUserModel) TableName() string { return "company_users" }
+
+// impersonationSessionModel is the audit trail for impersonate.go's
+// start/stop handlers — one row per impersonation, open (ended_at nil)
+// while it's in progress.
+type impersonationSessionModel struct {
+	ID              int        `db:"id"`
+	DeveloperUserID int        `db:"developer_user_id"`
+	TargetUserID    int        `db:"target_user_id"`
+	StartedAt       *time.Time `db:"started_at"`
+	EndedAt         *time.Time `db:"ended_at"`
+	IPAddress       *string    `db:"ip_address"`
+	UserAgent       *string    `db:"user_agent"`
+	CreatedAt       *time.Time `db:"created_at"`
+	UpdatedAt       *time.Time `db:"updated_at"`
+}
+
+func (impersonationSessionModel) TableName() string { return "impersonation_sessions" }

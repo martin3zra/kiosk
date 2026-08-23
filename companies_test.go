@@ -87,6 +87,17 @@ func testDB(t *testing.T) *playsql.DB {
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME
 		)`,
+		`CREATE TABLE impersonation_sessions (
+			id INTEGER NOT NULL PRIMARY KEY,
+			developer_user_id INTEGER NOT NULL,
+			target_user_id INTEGER NOT NULL,
+			started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			ended_at DATETIME,
+			ip_address TEXT,
+			user_agent TEXT,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME
+		)`,
 	}
 	for _, stmt := range schema {
 		if _, err := sqlDB.Exec(stmt); err != nil {
@@ -142,6 +153,7 @@ func TestCompanyPlanAddonLifecycle(t *testing.T) {
 		t.Fatalf("expected new company to default to active status, got %v", company["Status"])
 	}
 	companyID := int(company["ID"].(float64))
+	companyUUID := company["UUID"].(string)
 
 	// List companies — expect exactly the one just created.
 	status, _ = doJSON(t, companiesIndex(db), http.MethodGet, "", nil)
@@ -151,16 +163,23 @@ func TestCompanyPlanAddonLifecycle(t *testing.T) {
 
 	// Suspend it.
 	status, updated := doJSON(t, companiesUpdateStatus(db), http.MethodPut,
-		`{"status":"suspended"}`, map[string]string{"id": strconv.Itoa(companyID)})
+		`{"status":"suspended"}`, map[string]string{"id": companyUUID})
 	if status != http.StatusOK || updated["Status"] != "suspended" {
 		t.Fatalf("companiesUpdateStatus: status=%d body=%v", status, updated)
 	}
 
 	// Reject an invalid status value.
 	status, _ = doJSON(t, companiesUpdateStatus(db), http.MethodPut,
-		`{"status":"bogus"}`, map[string]string{"id": strconv.Itoa(companyID)})
+		`{"status":"bogus"}`, map[string]string{"id": companyUUID})
 	if status != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422 for invalid status, got %d", status)
+	}
+
+	// A malformed uuid path param is a 400, not a 500 from a botched query.
+	status, _ = doJSON(t, companiesUpdateStatus(db), http.MethodPut,
+		`{"status":"suspended"}`, map[string]string{"id": "not-a-uuid"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a malformed uuid path param, got %d", status)
 	}
 
 	// Create an addon and attach it to the company.
@@ -170,9 +189,10 @@ func TestCompanyPlanAddonLifecycle(t *testing.T) {
 		t.Fatalf("addonsCreate: status=%d body=%v", status, addon)
 	}
 	addonID := int(addon["ID"].(float64))
+	addonUUID := addon["UUID"].(string)
 
 	status, _ = doJSON(t, companiesAttachAddon(db), http.MethodPost,
-		`{"addon_id":`+strconv.Itoa(addonID)+`}`, map[string]string{"id": strconv.Itoa(companyID)})
+		`{"addon_id":`+strconv.Itoa(addonID)+`}`, map[string]string{"id": companyUUID})
 	if status != http.StatusCreated {
 		t.Fatalf("companiesAttachAddon: status=%d", status)
 	}
@@ -186,7 +206,7 @@ func TestCompanyPlanAddonLifecycle(t *testing.T) {
 
 	// Detach it again.
 	status, _ = doJSON(t, companiesDetachAddon(db), http.MethodDelete, "",
-		map[string]string{"id": strconv.Itoa(companyID), "addonId": strconv.Itoa(addonID)})
+		map[string]string{"id": companyUUID, "addonId": addonUUID})
 	if status != http.StatusOK {
 		t.Fatalf("companiesDetachAddon: status=%d", status)
 	}

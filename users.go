@@ -79,7 +79,7 @@ func usersCreate(db *playsql.DB) routing.HandlerFunc {
 
 func usersUpdate(db *playsql.DB) routing.HandlerFunc {
 	return routing.WithRequest(func(ctx *routing.Context, form *updateUserForm) {
-		id, ok := paramInt(ctx, "id")
+		id, ok := paramUUID(ctx, "id")
 		if !ok {
 			return
 		}
@@ -88,7 +88,7 @@ func usersUpdate(db *playsql.DB) routing.HandlerFunc {
 			return
 		}
 
-		_, err := db.Model(&kioskUserModel{}).WhereEq("id", id).Update(ctx.Request.Context(), map[string]any{
+		_, err := db.Model(&kioskUserModel{}).WhereEq("uuid", id).Update(ctx.Request.Context(), map[string]any{
 			"name":  form.Name,
 			"email": form.Email,
 			"role":  form.Role,
@@ -98,7 +98,7 @@ func usersUpdate(db *playsql.DB) routing.HandlerFunc {
 			return
 		}
 		var row kioskUserModel
-		if err := db.Model(&kioskUserModel{}).Find(ctx.Request.Context(), &row, id); err != nil {
+		if err := db.Model(&kioskUserModel{}).WhereEq("uuid", id).First(ctx.Request.Context(), &row); err != nil {
 			ctx.Error(err)
 			return
 		}

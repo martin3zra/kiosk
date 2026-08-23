@@ -146,3 +146,16 @@ type updateUserForm struct {
 func (f *updateUserForm) Rules() map[string]any {
 	return map[string]any{"name": "required", "email": "required"}
 }
+
+// assignCompanyUserForm backs companiesAttachUser — Name is only used when
+// Email doesn't match an existing user (a fresh one gets created).
+type assignCompanyUserForm struct {
+	support.FormRequest
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
+func (f *assignCompanyUserForm) Rules() map[string]any {
+	return map[string]any{"name": "required", "email": "required"}
+}

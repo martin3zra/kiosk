@@ -1,0 +1,19 @@
+up:
+  impersonation_session:
+    action: create
+    table: impersonation_sessions
+    columns:
+      id: id
+      developer_user_id: bigint
+      target_user_id: bigint
+      started_at: timestamp useCurrent
+      ended_at: timestamp nullable
+      ip_address: string:64 nullable
+      user_agent: string:255 nullable
+      created_at: timestamp useCurrent
+      updated_at: timestamp nullable
+
+down:
+  impersonation_session:
+    action: drop
+    table: impersonation_sessions

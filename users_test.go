@@ -3,10 +3,10 @@ package kiosk
 import (
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/martin3zra/forge/routing"
 	"github.com/martin3zra/forge/session"
 	"github.com/martin3zra/playsql"
@@ -29,7 +29,7 @@ func TestUsersCreateAndUpdate(t *testing.T) {
 	if pw, _ := user["Password"].(string); pw == "" || pw == "grace@example.com" {
 		t.Fatalf("expected a hashed random password, got %q", pw)
 	}
-	userID := int(user["ID"].(float64))
+	userUUID := user["UUID"].(string)
 
 	status, _ = doJSON(t, usersCreate(db), http.MethodPost,
 		`{"name":"Bad Role","email":"bad@example.com","role":"root"}`, nil)
@@ -39,7 +39,7 @@ func TestUsersCreateAndUpdate(t *testing.T) {
 
 	status, updated := doJSON(t, usersUpdate(db), http.MethodPut,
 		`{"name":"Grace H","email":"grace@example.com","role":"admin"}`,
-		map[string]string{"id": strconv.Itoa(userID)})
+		map[string]string{"id": userUUID})
 	if status != http.StatusOK || updated["Name"] != "Grace H" || updated["Role"] != "admin" {
 		t.Fatalf("usersUpdate: status=%d body=%v", status, updated)
 	}
@@ -66,7 +66,7 @@ func TestImpersonateLifecycle(t *testing.T) {
 
 	var developer kioskUserModel
 	if err := db.Model(&kioskUserModel{}).Create(ctx0, &developer, map[string]any{
-		"uuid": "dev-uuid", "name": "Dev", "email": "dev@example.com",
+		"uuid": uuid.NewString(), "name": "Dev", "email": "dev@example.com",
 		"password": "x", "role": "admin",
 	}); err != nil {
 		t.Fatalf("seed developer: %v", err)
@@ -74,7 +74,7 @@ func TestImpersonateLifecycle(t *testing.T) {
 
 	var target kioskUserModel
 	if err := db.Model(&kioskUserModel{}).Create(ctx0, &target, map[string]any{
-		"uuid": "target-uuid", "name": "Target", "email": "target@example.com",
+		"uuid": uuid.NewString(), "name": "Target", "email": "target@example.com",
 		"password": "x", "role": "user",
 	}); err != nil {
 		t.Fatalf("seed target: %v", err)
@@ -82,7 +82,7 @@ func TestImpersonateLifecycle(t *testing.T) {
 
 	var otherDev kioskUserModel
 	if err := db.Model(&kioskUserModel{}).Create(ctx0, &otherDev, map[string]any{
-		"uuid": "other-dev-uuid", "name": "Other Dev", "email": "other-dev@example.com",
+		"uuid": uuid.NewString(), "name": "Other Dev", "email": "other-dev@example.com",
 		"password": "x", "role": "admin",
 	}); err != nil {
 		t.Fatalf("seed other developer: %v", err)
@@ -96,7 +96,7 @@ func TestImpersonateLifecycle(t *testing.T) {
 
 	// Can't impersonate another kiosk developer.
 	rec := httptest.NewRecorder()
-	rctx := &routing.Context{Response: rec, Request: req, Params: map[string]string{"id": strconv.Itoa(otherDev.ID)}}
+	rctx := &routing.Context{Response: rec, Request: req, Params: map[string]string{"id": otherDev.UUID}}
 	impersonateStart(db, allowlist)(rctx)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 impersonating another developer, got %d", rec.Code)
@@ -104,7 +104,7 @@ func TestImpersonateLifecycle(t *testing.T) {
 
 	// Start impersonating the target.
 	rec = httptest.NewRecorder()
-	rctx = &routing.Context{Response: rec, Request: req, Params: map[string]string{"id": strconv.Itoa(target.ID)}}
+	rctx = &routing.Context{Response: rec, Request: req, Params: map[string]string{"id": target.UUID}}
 	impersonateStart(db, allowlist)(rctx)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("impersonateStart: status=%d body=%s", rec.Code, rec.Body.String())
@@ -118,10 +118,29 @@ func TestImpersonateLifecycle(t *testing.T) {
 
 	// Can't stack a second impersonation.
 	rec = httptest.NewRecorder()
-	rctx = &routing.Context{Response: rec, Request: req, Params: map[string]string{"id": strconv.Itoa(otherDev.ID)}}
+	rctx = &routing.Context{Response: rec, Request: req, Params: map[string]string{"id": otherDev.UUID}}
 	impersonateStart(db, allowlist)(rctx)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409 stacking impersonation, got %d", rec.Code)
+	}
+
+	// A target with no company_users row leaves company_id unset.
+	if sess.Get("company_id") != nil {
+		t.Fatalf("expected no company_id for a target with no company membership, got %v", sess.Get("company_id"))
+	}
+
+	// An open audit row exists for this impersonation.
+	var audit impersonationSessionModel
+	if err := db.Model(&impersonationSessionModel{}).
+		WhereEq("developer_user_id", developer.ID).WhereEq("target_user_id", target.ID).
+		First(ctx0, &audit); err != nil {
+		t.Fatalf("expected an impersonation_sessions row, got err=%v", err)
+	}
+	if audit.StartedAt == nil {
+		t.Fatalf("expected started_at to be set")
+	}
+	if audit.EndedAt != nil {
+		t.Fatalf("expected ended_at to be nil while impersonation is active, got %v", audit.EndedAt)
 	}
 
 	// Stop — restores the developer.
@@ -137,6 +156,16 @@ func TestImpersonateLifecycle(t *testing.T) {
 	if sess.Get(impersonateSessionKey) != nil {
 		t.Fatalf("expected %q cleared after stop, still %v", impersonateSessionKey, sess.Get(impersonateSessionKey))
 	}
+	if sess.Get("company_id") != nil {
+		t.Fatalf("expected company_id cleared after stop, still %v", sess.Get("company_id"))
+	}
+
+	if err := db.Model(&impersonationSessionModel{}).Find(ctx0, &audit, audit.ID); err != nil {
+		t.Fatalf("reload audit row: %v", err)
+	}
+	if audit.EndedAt == nil {
+		t.Fatalf("expected ended_at to be set after impersonateStop")
+	}
 
 	// Stopping again with nothing to stop is a client error, not a panic.
 	rec = httptest.NewRecorder()
@@ -144,5 +173,58 @@ func TestImpersonateLifecycle(t *testing.T) {
 	impersonateStop(db)(rctx)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 stopping with no active impersonation, got %d", rec.Code)
+	}
+}
+
+// TestImpersonateSetsCompanyIDFromMembership covers the other half of the
+// company_id behavior TestImpersonateLifecycle doesn't: a target who *does*
+// belong to a company. This is the signal a host app's own developer-must-
+// impersonate-to-see-company-pages guard reads.
+func TestImpersonateSetsCompanyIDFromMembership(t *testing.T) {
+	db := testDB(t)
+	ctx0 := t.Context()
+
+	var developer kioskUserModel
+	if err := db.Model(&kioskUserModel{}).Create(ctx0, &developer, map[string]any{
+		"uuid": uuid.NewString(), "name": "Dev", "email": "dev@example.com",
+		"password": "x", "role": "admin",
+	}); err != nil {
+		t.Fatalf("seed developer: %v", err)
+	}
+
+	var target kioskUserModel
+	if err := db.Model(&kioskUserModel{}).Create(ctx0, &target, map[string]any{
+		"uuid": uuid.NewString(), "name": "Target", "email": "target@example.com",
+		"password": "x", "role": "user",
+	}); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+
+	var company companyModel
+	if err := db.Model(&companyModel{}).Create(ctx0, &company, map[string]any{
+		"uuid": uuid.NewString(), "name": "Acme", "status": "active",
+	}); err != nil {
+		t.Fatalf("seed company: %v", err)
+	}
+	if err := db.Model(&companyUserModel{}).Create(ctx0, &companyUserModel{}, map[string]any{
+		"company_id": company.ID, "user_id": target.ID, "role": "member",
+	}); err != nil {
+		t.Fatalf("seed company_users row: %v", err)
+	}
+
+	allowlist := map[string]bool{"dev@example.com": true}
+	sess, req := newTestSession(t, db)
+	sess.Put("user_id", developer.ID)
+	sess.Put("user", sessionUserPayload(developer))
+
+	rec := httptest.NewRecorder()
+	rctx := &routing.Context{Response: rec, Request: req, Params: map[string]string{"id": target.UUID}}
+	impersonateStart(db, allowlist)(rctx)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("impersonateStart: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	if got, ok := toInt(sess.Get("company_id")); !ok || got != company.ID {
+		t.Fatalf("expected session company_id=%d, got %v", company.ID, sess.Get("company_id"))
 	}
 }

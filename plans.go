@@ -39,11 +39,11 @@ func plansCreate(db *playsql.DB) routing.HandlerFunc {
 
 func plansUpdate(db *playsql.DB) routing.HandlerFunc {
 	return routing.WithRequest(func(ctx *routing.Context, form *planForm) {
-		id, ok := paramInt(ctx, "id")
+		id, ok := paramUUID(ctx, "id")
 		if !ok {
 			return
 		}
-		_, err := db.Model(&planModel{}).WhereEq("id", id).Update(ctx.Request.Context(), map[string]any{
+		_, err := db.Model(&planModel{}).WhereEq("uuid", id).Update(ctx.Request.Context(), map[string]any{
 			"name":        form.Name,
 			"price_cents": form.PriceCents,
 			"currency":    defaultCurrency(form.Currency),
@@ -54,7 +54,7 @@ func plansUpdate(db *playsql.DB) routing.HandlerFunc {
 			return
 		}
 		var row planModel
-		if err := db.Model(&planModel{}).Find(ctx.Request.Context(), &row, id); err != nil {
+		if err := db.Model(&planModel{}).WhereEq("uuid", id).First(ctx.Request.Context(), &row); err != nil {
 			ctx.Error(err)
 			return
 		}

@@ -3,6 +3,7 @@ package kiosk
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/martin3zra/forge/routing"
 	"github.com/martin3zra/forge/session"
@@ -11,11 +12,16 @@ import (
 
 const impersonateSessionKey = "kiosk_original_user_id"
 
-// impersonateStart handles POST /kiosks/impersonate/:id. Session-only for
-// v1 — no audit table — per the technical spec.
+// impersonateStart handles POST /kiosks/impersonate/:id. Besides swapping
+// the session identity, it opens an impersonation_sessions audit row and
+// seeds session["company_id"] from the target's company_users membership —
+// the signal a host app's own "developer must impersonate to see company
+// pages" guard reads (see RedirectDeveloperToKiosk-style middleware in the
+// host app; Kiosk itself has no opinion on what a developer without a
+// company_id is allowed to view).
 func impersonateStart(db *playsql.DB, allowlist map[string]bool) routing.HandlerFunc {
 	return func(ctx *routing.Context) {
-		targetID, ok := paramInt(ctx, "id")
+		targetUUID, ok := paramUUID(ctx, "id")
 		if !ok {
 			return
 		}
@@ -28,8 +34,14 @@ func impersonateStart(db *playsql.DB, allowlist map[string]bool) routing.Handler
 			return
 		}
 
+		actorID, ok := toInt(sess.Get("user_id"))
+		if !ok {
+			ctx.JSON(http.StatusUnauthorized, map[string]any{"error": "not authenticated"})
+			return
+		}
+
 		var target kioskUserModel
-		if err := db.Model(&kioskUserModel{}).Find(ctx.Request.Context(), &target, targetID); err != nil {
+		if err := db.Model(&kioskUserModel{}).WhereEq("uuid", targetUUID).First(ctx.Request.Context(), &target); err != nil {
 			ctx.Error(err)
 			return
 		}
@@ -39,15 +51,44 @@ func impersonateStart(db *playsql.DB, allowlist map[string]bool) routing.Handler
 			return
 		}
 
-		sess.Put(impersonateSessionKey, sess.Get("user_id"))
+		ip := ctx.Request.RemoteAddr
+		ua := ctx.Request.UserAgent()
+		var auditRow impersonationSessionModel
+		err := db.Model(&impersonationSessionModel{}).Create(ctx.Request.Context(), &auditRow, map[string]any{
+			"developer_user_id": actorID,
+			"target_user_id":    target.ID,
+			"started_at":        time.Now(),
+			"ip_address":        ip,
+			"user_agent":        ua,
+		})
+		if err != nil {
+			ctx.Error(err)
+			return
+		}
+
+		// A target with no company_users row yet (freshly created, not
+		// assigned) leaves company_id unset — same as a developer who never
+		// impersonated. Not an error: assigning them to a company is a
+		// separate step (see companiesAttachUser).
+		var membership companyUserModel
+		companyErr := db.Model(&companyUserModel{}).WhereEq("user_id", target.ID).First(ctx.Request.Context(), &membership)
+
+		sess.Put(impersonateSessionKey, actorID)
 		sess.Put("user_id", target.ID)
 		sess.Put("user", sessionUserPayload(target))
+		if companyErr == nil {
+			sess.Put("company_id", membership.CompanyID)
+		} else {
+			sess.Delete("company_id")
+		}
 
 		ctx.JSON(http.StatusOK, map[string]any{"ok": true, "impersonating": target.Email})
 	}
 }
 
-// impersonateStop handles DELETE /kiosks/impersonate.
+// impersonateStop handles DELETE /kiosks/impersonate. Closes the audit row
+// impersonateStart opened and drops company_id — the developer goes back to
+// having no company context, same as before they impersonated anyone.
 func impersonateStop(db *playsql.DB) routing.HandlerFunc {
 	return func(ctx *routing.Context) {
 		sess := session.GetSession(ctx.Request)
@@ -64,9 +105,19 @@ func impersonateStop(db *playsql.DB) routing.HandlerFunc {
 			return
 		}
 
+		_, err := db.Model(&impersonationSessionModel{}).
+			WhereEq("developer_user_id", originalID).
+			WhereNull("ended_at").
+			Update(ctx.Request.Context(), map[string]any{"ended_at": time.Now()})
+		if err != nil {
+			ctx.Error(err)
+			return
+		}
+
 		sess.Put("user_id", original.ID)
 		sess.Put("user", sessionUserPayload(original))
 		sess.Delete(impersonateSessionKey)
+		sess.Delete("company_id")
 
 		ctx.JSON(http.StatusOK, map[string]any{"ok": true})
 	}

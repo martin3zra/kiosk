@@ -43,15 +43,22 @@ func addonsCreate(db *playsql.DB) routing.HandlerFunc {
 	})
 }
 
-// companiesAttachAddon handles POST /kiosks/companies/:id/addons.
+// companiesAttachAddon handles POST /kiosks/companies/:id/addons. :id is a
+// uuid (every URL-facing id in Kiosk's API is), but company_addons stores
+// integer FKs, so the company row is resolved first to get its internal id.
 func companiesAttachAddon(db *playsql.DB) routing.HandlerFunc {
 	return routing.WithRequest(func(ctx *routing.Context, form *attachAddonForm) {
-		companyID, ok := paramInt(ctx, "id")
+		companyUUID, ok := paramUUID(ctx, "id")
 		if !ok {
 			return
 		}
+		var company companyModel
+		if err := db.Model(&companyModel{}).WhereEq("uuid", companyUUID).First(ctx.Request.Context(), &company); err != nil {
+			ctx.Error(err)
+			return
+		}
 		_, err := db.Model(&companyAddonModel{}).Insert(ctx.Request.Context(), map[string]any{
-			"company_id": companyID,
+			"company_id": company.ID,
 			"addon_id":   form.AddonID,
 		})
 		if err != nil {
@@ -62,20 +69,32 @@ func companiesAttachAddon(db *playsql.DB) routing.HandlerFunc {
 	})
 }
 
-// companiesDetachAddon handles DELETE /kiosks/companies/:id/addons/:addonId.
+// companiesDetachAddon handles DELETE /kiosks/companies/:id/addons/:addonId
+// — both uuids, resolved to their internal ids before matching them against
+// company_addons' integer FK columns.
 func companiesDetachAddon(db *playsql.DB) routing.HandlerFunc {
 	return func(ctx *routing.Context) {
-		companyID, ok := paramInt(ctx, "id")
+		companyUUID, ok := paramUUID(ctx, "id")
 		if !ok {
 			return
 		}
-		addonID, ok := paramInt(ctx, "addonId")
+		addonUUID, ok := paramUUID(ctx, "addonId")
 		if !ok {
+			return
+		}
+		var company companyModel
+		if err := db.Model(&companyModel{}).WhereEq("uuid", companyUUID).First(ctx.Request.Context(), &company); err != nil {
+			ctx.Error(err)
+			return
+		}
+		var addon addonModel
+		if err := db.Model(&addonModel{}).WhereEq("uuid", addonUUID).First(ctx.Request.Context(), &addon); err != nil {
+			ctx.Error(err)
 			return
 		}
 		_, err := db.Model(&companyAddonModel{}).
-			WhereEq("company_id", companyID).
-			WhereEq("addon_id", addonID).
+			WhereEq("company_id", company.ID).
+			WhereEq("addon_id", addon.ID).
 			ForceDelete(ctx.Request.Context())
 		if err != nil {
 			ctx.Error(err)
