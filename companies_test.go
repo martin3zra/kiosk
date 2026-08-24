@@ -107,6 +107,19 @@ func testDB(t *testing.T) *playsql.DB {
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME
 		)`,
+		`CREATE TABLE invitations (
+			id INTEGER NOT NULL PRIMARY KEY,
+			uuid TEXT NOT NULL,
+			company_id INTEGER NOT NULL,
+			role_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			email TEXT NOT NULL,
+			token TEXT NOT NULL UNIQUE,
+			expires_at DATETIME NOT NULL,
+			accepted_at DATETIME,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME
+		)`,
 	}
 	for _, stmt := range schema {
 		if _, err := sqlDB.Exec(stmt); err != nil {
@@ -164,11 +177,13 @@ func TestCompanyPlanAddonLifecycle(t *testing.T) {
 
 	// Create a company on that plan.
 	allowlist := map[string]bool{}
-	status, company := doJSON(t, companiesCreate(db, allowlist), http.MethodPost,
+	m, _ := testMailer(t)
+	status, created := doJSON(t, companiesCreate(db, m, allowlist, "https://app.example.com"), http.MethodPost,
 		`{"name":"Acme Inc","owner_name":"Owner","owner_email":"owner@example.com","plan_id":`+strconv.Itoa(planID)+`}`, nil)
 	if status != http.StatusCreated {
-		t.Fatalf("companiesCreate: status=%d body=%v", status, company)
+		t.Fatalf("companiesCreate: status=%d body=%v", status, created)
 	}
+	company := created["company"].(map[string]any)
 	if company["Status"] != "active" {
 		t.Fatalf("expected new company to default to active status, got %v", company["Status"])
 	}

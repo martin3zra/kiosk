@@ -5,16 +5,18 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
-	"github.com/martin3zra/forge/foundation"
+	"github.com/martin3zra/forge/mailer"
 	"github.com/martin3zra/forge/routing"
 	"github.com/martin3zra/playsql"
 )
 
-// companiesAttachUser handles POST /kiosks/companies/:id/users. It finds or
-// creates the target user by email, then attaches them to the company —
-// one combined action, not "create a user" followed by a separate "assign"
-// step, so a company can never end up with a user that has no login.
+// companiesAttachUser handles POST /kiosks/companies/:id/users. If Email
+// matches an existing user they're attached immediately — one combined
+// action, not "create a user" followed by a separate "assign" step, so a
+// company can never end up with a member that has no login. If it doesn't,
+// an invitation is sent instead of eagerly creating an account nobody's
+// confirmed yet (see createOrRefreshInvitation in invitations.go); the
+// company_users row is only created once that invitation is accepted.
 //
 // v1 assumes a user belongs to at most one company: company_users has no
 // column marking a "current" membership (cactusHR's model does, for
@@ -22,7 +24,7 @@ import (
 // *different* company is rejected rather than silently moving them.
 // Re-attaching to the *same* company updates their role and is treated as
 // idempotent.
-func companiesAttachUser(db *playsql.DB, allowlist map[string]bool) routing.HandlerFunc {
+func companiesAttachUser(db *playsql.DB, m mailer.Mailer, allowlist map[string]bool, appURL string) routing.HandlerFunc {
 	return routing.WithRequest(func(ctx *routing.Context, form *assignCompanyUserForm) {
 		companyUUID, ok := paramUUID(ctx, "id")
 		if !ok {
@@ -55,7 +57,18 @@ func companiesAttachUser(db *playsql.DB, allowlist map[string]bool) routing.Hand
 			return
 		}
 
-		user, err := findOrCreateCompanyUser(ctx, db, email, form.Name)
+		var user kioskUserModel
+		err = db.Model(&kioskUserModel{}).WhereEq("email", email).First(ctx.Request.Context(), &user)
+		if errors.Is(err, playsql.ErrNotFound) {
+			invite, inviteErr := createOrRefreshInvitation(ctx, db, company.ID, role.ID, form.Name, email)
+			if inviteErr != nil {
+				ctx.Error(inviteErr)
+				return
+			}
+			sendInvitationEmail(m, invite, company.Name, appURL)
+			ctx.JSON(http.StatusAccepted, map[string]any{"invited": true, "email": email})
+			return
+		}
 		if err != nil {
 			ctx.Error(err)
 			return
@@ -184,32 +197,4 @@ func companiesShowRow(ctx *routing.Context, db *playsql.DB, uuid string) (compan
 	var row companyModel
 	err := db.Model(&companyModel{}).WhereEq("uuid", uuid).First(ctx.Request.Context(), &row)
 	return row, err
-}
-
-// findOrCreateCompanyUser mirrors usersCreate's new-account shape (random
-// temp password, must_change_password) for the case where email doesn't
-// match an existing user yet.
-func findOrCreateCompanyUser(ctx *routing.Context, db *playsql.DB, email, name string) (kioskUserModel, error) {
-	var user kioskUserModel
-	err := db.Model(&kioskUserModel{}).WhereEq("email", email).First(ctx.Request.Context(), &user)
-	if err == nil {
-		return user, nil
-	}
-	if !errors.Is(err, playsql.ErrNotFound) {
-		return kioskUserModel{}, err
-	}
-
-	temp, err := randomPassword()
-	if err != nil {
-		return kioskUserModel{}, err
-	}
-	err = db.Model(&kioskUserModel{}).Create(ctx.Request.Context(), &user, map[string]any{
-		"uuid":                 uuid.NewString(),
-		"name":                 name,
-		"email":                email,
-		"role":                 "user",
-		"password":             foundation.NewHashable().Make(temp),
-		"must_change_password": true,
-	})
-	return user, err
 }

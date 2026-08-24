@@ -157,7 +157,8 @@ func (f *updateUserForm) Rules() map[string]any {
 }
 
 // assignCompanyUserForm backs companiesAttachUser — Name is only used when
-// Email doesn't match an existing user (a fresh one gets created).
+// Email doesn't match an existing user (they're invited rather than
+// attached immediately; see createOrRefreshInvitation).
 type assignCompanyUserForm struct {
 	support.FormRequest
 	Name  string `json:"name"`
@@ -167,4 +168,16 @@ type assignCompanyUserForm struct {
 
 func (f *assignCompanyUserForm) Rules() map[string]any {
 	return map[string]any{"name": "required", "email": "required"}
+}
+
+// acceptInvitationForm backs invitationsAccept — the invitee's chosen
+// password (name/email/company/role all come from the invitation itself,
+// not this form).
+type acceptInvitationForm struct {
+	support.FormRequest
+	Password string `json:"password"`
+}
+
+func (f *acceptInvitationForm) Rules() map[string]any {
+	return map[string]any{"password": "required"}
 }

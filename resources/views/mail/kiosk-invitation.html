@@ -1,0 +1,11 @@
+<!-- Test fixture only — mirrors the exact path (resources/views/mail/kiosk-invitation.html)
+     invitationMail.Content() returns, which is only real once kiosk:install
+     has copied mail/kiosk-invitation.html into a host project's
+     resources/views/mail/ and the host's own embed.FS (rooted at the
+     module root, e.g. spark's main.go `//go:embed resources/views/*`)
+     picks it up. Kiosk's own tests have no host embed.FS to borrow, so
+     this stands in for one — see invitations_test.go. Keep this in sync
+     with mail/kiosk-invitation.html if the template vars change. -->
+<p>{{.Title}}</p>
+<p>{{.Message}}</p>
+<a href="{{.CTAURL}}">{{.CTAText}}</a>

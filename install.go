@@ -16,6 +16,9 @@ var pagesFS embed.FS
 //go:embed layout/*.tsx
 var layoutFS embed.FS
 
+//go:embed mail/*.html
+var mailFS embed.FS
+
 // source maps one embedded directory (the module's canonical copy) to where
 // kiosk:install writes it in a host project. camel and Vite both only look
 // at fixed on-disk directories, so this is the manifest — there's no
@@ -32,6 +35,7 @@ var sources = []source{
 	{kind: "migration", fsys: migrationsFS, srcDir: "migrations", destDir: "database"},
 	{kind: "page", fsys: pagesFS, srcDir: "pages", destDir: "resources/js/Pages/Kiosk"},
 	{kind: "layout", fsys: layoutFS, srcDir: "layout", destDir: "resources/js/layouts"},
+	{kind: "mail", fsys: mailFS, srcDir: "mail", destDir: "resources/views/mail"},
 }
 
 func sourceFor(kind string) source {

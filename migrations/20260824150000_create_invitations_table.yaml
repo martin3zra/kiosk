@@ -1,0 +1,25 @@
+up:
+  invitation:
+    action: create
+    table: invitations
+    columns:
+      id: id
+      uuid: string:36
+      company_id: bigint
+      role_id: bigint
+      name: string:255
+      email: string:255
+      token: string:64
+      expires_at: timestamp
+      accepted_at: timestamp nullable
+      created_at: timestamp useCurrent
+      updated_at: timestamp nullable
+    indexes:
+      - name: invitations_token_uq
+        columns: [token]
+        unique: true
+
+down:
+  invitation:
+    action: drop
+    table: invitations

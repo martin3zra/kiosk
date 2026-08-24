@@ -14,6 +14,7 @@ import (
 
 	"github.com/martin3zra/forge/auth"
 	"github.com/martin3zra/forge/foundation"
+	"github.com/martin3zra/forge/mailer"
 	"github.com/martin3zra/forge/routing"
 	"github.com/martin3zra/playsql"
 )
@@ -36,6 +37,18 @@ type Options struct {
 	// independent of the host app's own role/permission system. Nil or
 	// empty locks everyone out — it does not disable the routes.
 	Allowlist map[string]bool
+
+	// Mailer sends the invitation email companiesAttachUser/companiesCreate
+	// trigger for an email that doesn't match an existing user. Build its
+	// Config with a sensible default driver (mailer.Log works with no
+	// credentials at all) if the host hasn't set one up — Kiosk has no way
+	// to detect or override an unconfigured mailer.Mailer from here.
+	Mailer mailer.Mailer
+
+	// AppURL is the host's own base URL (e.g. "https://app.example.com",
+	// no trailing slash needed) — used to build the absolute accept-
+	// invitation link an email recipient can actually click.
+	AppURL string
 }
 
 // Register mounts Kiosk's routes on router at /kiosks.
@@ -49,14 +62,17 @@ func Register(router *routing.Router, opts Options) {
 			rg2.GET("/roles", rolesIndex(opts.DB))
 
 			rg2.GET("/companies", companiesIndex(opts.DB))
-			rg2.POST("/companies", companiesCreate(opts.DB, opts.Allowlist))
+			rg2.POST("/companies", companiesCreate(opts.DB, opts.Mailer, opts.Allowlist, opts.AppURL))
 			rg2.GET("/companies/:id", companiesShow(opts.DB))
 			rg2.PUT("/companies/:id/status", companiesUpdateStatus(opts.DB))
 			rg2.PUT("/companies/:id/plan", companiesUpdatePlan(opts.DB))
 
 			rg2.GET("/companies/:id/users", companiesUsersIndex(opts.DB))
-			rg2.POST("/companies/:id/users", companiesAttachUser(opts.DB, opts.Allowlist))
+			rg2.POST("/companies/:id/users", companiesAttachUser(opts.DB, opts.Mailer, opts.Allowlist, opts.AppURL))
 			rg2.DELETE("/companies/:id/users/:userId", companiesDetachUser(opts.DB))
+
+			rg2.GET("/companies/:id/invitations", companiesInvitationsIndex(opts.DB))
+			rg2.POST("/companies/:id/invitations/:invitationId/resend", companiesInvitationsResend(opts.DB, opts.Mailer, opts.AppURL))
 
 			rg2.GET("/plans", plansIndex(opts.DB))
 			rg2.POST("/plans", plansCreate(opts.DB))
@@ -84,6 +100,16 @@ func Register(router *routing.Router, opts Options) {
 		// opts.Middleware for an authenticated session, not the allowlist.
 		rg.GroupWithMiddleware(opts.Middleware, func(rg2 *routing.Router) {
 			rg2.DELETE("/impersonate", impersonateStop(opts.DB))
+		})
+
+		// Invitation accept routes are fully public — no middleware at
+		// all, not even opts.Middleware. The invited person has no
+		// account yet, so there's nothing to authenticate against; the
+		// token itself (a real DB row with an expiry) is the only
+		// credential. See loadValidInvitation in invitations.go.
+		rg.Group(func(rg2 *routing.Router) {
+			rg2.GET("/invitations/:token", invitationsShow(opts.DB))
+			rg2.POST("/invitations/:token", invitationsAccept(opts.DB))
 		})
 	})
 }

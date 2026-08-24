@@ -109,3 +109,25 @@ type impersonationSessionModel struct {
 }
 
 func (impersonationSessionModel) TableName() string { return "impersonation_sessions" }
+
+// invitationModel is a pending "join this company" invite — created instead
+// of an eager user account whenever companiesAttachUser/companiesCreate is
+// given an email that doesn't match an existing user (see
+// findOrCreateInvitedCompanyUser in company_users.go). AcceptedAt is nil
+// until the invitationsAccept handler fills it in; there's no separate
+// "revoked" state, just letting ExpiresAt pass.
+type invitationModel struct {
+	ID         int        `db:"id"`
+	UUID       string     `db:"uuid"`
+	CompanyID  int        `db:"company_id"`
+	RoleID     int        `db:"role_id"`
+	Name       string     `db:"name"`
+	Email      string     `db:"email"`
+	Token      string     `db:"token"`
+	ExpiresAt  *time.Time `db:"expires_at"`
+	AcceptedAt *time.Time `db:"accepted_at"`
+	CreatedAt  *time.Time `db:"created_at"`
+	UpdatedAt  *time.Time `db:"updated_at"`
+}
+
+func (invitationModel) TableName() string { return "invitations" }

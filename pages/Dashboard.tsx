@@ -21,6 +21,15 @@ interface Member {
   role: string;
 }
 
+interface Invitation {
+  uuid: string;
+  name: string;
+  email: string;
+  role: string;
+  expires_at: string;
+  expired: boolean;
+}
+
 // rolesIndex returns the raw roleModel rows — no custom json tags, same
 // convention companiesIndex/plansIndex/usersIndex already use (capitalized
 // Go field names as JSON keys), unlike memberRow/CompanyRow below, which are
@@ -115,12 +124,14 @@ function NewCompanyForm({ headers }: { headers: Record<string, string> }) {
   const [ownerName, setOwnerName] = useState("");
   const [ownerEmail, setOwnerEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
+    setNotice(null);
     const res = await fetch("/kiosks/companies", {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
@@ -137,6 +148,12 @@ function NewCompanyForm({ headers }: { headers: Record<string, string> }) {
       setError(body.error ?? "Could not create the company.");
       return;
     }
+    const body = await res.json().catch(() => ({}));
+    setNotice(
+      body.owner_invited
+        ? `${name} created — an invitation was emailed to ${ownerEmail}.`
+        : `${name} created — ${ownerEmail} attached as owner.`,
+    );
     setName("");
     setIdentifier("");
     setOwnerName("");
@@ -193,6 +210,9 @@ function NewCompanyForm({ headers }: { headers: Record<string, string> }) {
       {error && (
         <p className="text-destructive text-sm sm:col-span-4">{error}</p>
       )}
+      {notice && (
+        <p className="text-sm text-emerald-600 sm:col-span-4">{notice}</p>
+      )}
     </form>
   );
 }
@@ -208,21 +228,33 @@ function CompanyCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [members, setMembers] = useState<Member[] | null>(null);
+  const [invitations, setInvitations] = useState<Invitation[] | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function loadMembers() {
-    setLoading(true);
     const res = await fetch(`/kiosks/companies/${company.uuid}/users`, {
       headers,
     });
     setMembers(res.ok ? await res.json() : []);
+  }
+
+  async function loadInvitations() {
+    const res = await fetch(`/kiosks/companies/${company.uuid}/invitations`, {
+      headers,
+    });
+    setInvitations(res.ok ? await res.json() : []);
+  }
+
+  async function loadAll() {
+    setLoading(true);
+    await Promise.all([loadMembers(), loadInvitations()]);
     setLoading(false);
   }
 
   function toggle() {
     const next = !expanded;
     setExpanded(next);
-    if (next && members === null) void loadMembers();
+    if (next && members === null) void loadAll();
   }
 
   return (
@@ -244,13 +276,15 @@ function CompanyCard({
           {loading && (
             <p className="text-muted-foreground text-sm">Loading…</p>
           )}
-          {members && (
+          {members && invitations && (
             <MembersPanel
               company={company}
               members={members}
+              invitations={invitations}
               headers={headers}
               roles={roles}
-              onChange={loadMembers}
+              onMemberChange={loadMembers}
+              onInvitationChange={loadInvitations}
             />
           )}
         </div>
@@ -262,15 +296,19 @@ function CompanyCard({
 function MembersPanel({
   company,
   members,
+  invitations,
   headers,
   roles,
-  onChange,
+  onMemberChange,
+  onInvitationChange,
 }: {
   company: CompanyRow;
   members: Member[];
+  invitations: Invitation[];
   headers: Record<string, string>;
   roles: Role[];
-  onChange: () => void;
+  onMemberChange: () => void;
+  onInvitationChange: () => void;
 }) {
   return (
     <div className="space-y-4">
@@ -290,10 +328,10 @@ function MembersPanel({
               company={company}
               member={m}
               headers={headers}
-              onChange={onChange}
+              onChange={onMemberChange}
             />
           ))}
-          {members.length === 0 && (
+          {members.length === 0 && invitations.length === 0 && (
             <tr>
               <td
                 colSpan={4}
@@ -303,6 +341,15 @@ function MembersPanel({
               </td>
             </tr>
           )}
+          {invitations.map((inv) => (
+            <InvitationRow
+              key={inv.uuid}
+              company={company}
+              invitation={inv}
+              headers={headers}
+              onChange={onInvitationChange}
+            />
+          ))}
         </tbody>
       </table>
 
@@ -310,9 +357,65 @@ function MembersPanel({
         company={company}
         headers={headers}
         roles={roles}
-        onChange={onChange}
+        onMemberChange={onMemberChange}
+        onInvitationChange={onInvitationChange}
       />
     </div>
+  );
+}
+
+function InvitationRow({
+  company,
+  invitation,
+  headers,
+  onChange,
+}: {
+  company: CompanyRow;
+  invitation: Invitation;
+  headers: Record<string, string>;
+  onChange: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  async function resend() {
+    setBusy(true);
+    await fetch(
+      `/kiosks/companies/${company.uuid}/invitations/${invitation.uuid}/resend`,
+      { method: "POST", headers },
+    );
+    setBusy(false);
+    onChange();
+  }
+
+  return (
+    <tr className="border-t align-top">
+      <td className="py-2">{invitation.name}</td>
+      <td className="text-muted-foreground">{invitation.email}</td>
+      <td className="text-muted-foreground">{invitation.role}</td>
+      <td className="py-2 text-right">
+        <div className="flex items-center justify-end gap-2">
+          <span
+            className={
+              "rounded px-2 py-0.5 text-xs font-medium " +
+              (invitation.expired
+                ? "bg-amber-500/10 text-amber-600"
+                : "bg-sky-500/10 text-sky-600")
+            }
+          >
+            {invitation.expired ? "expired" : "pending"}
+          </span>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            disabled={busy}
+            onClick={resend}
+          >
+            Resend
+          </Button>
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -396,23 +499,27 @@ function AssignUserForm({
   company,
   headers,
   roles,
-  onChange,
+  onMemberChange,
+  onInvitationChange,
 }: {
   company: CompanyRow;
   headers: Record<string, string>;
   roles: Role[];
-  onChange: () => void;
+  onMemberChange: () => void;
+  onInvitationChange: () => void;
 }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
+    setNotice(null);
     const res = await fetch(`/kiosks/companies/${company.uuid}/users`, {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
@@ -424,10 +531,16 @@ function AssignUserForm({
       setError(body.error ?? "Could not assign the user.");
       return;
     }
+    const body = await res.json().catch(() => ({}));
     setName("");
     setEmail("");
     setRole("");
-    onChange();
+    if (body.invited) {
+      setNotice(`Invitation emailed to ${email}.`);
+      onInvitationChange();
+    } else {
+      onMemberChange();
+    }
   }
 
   return (
@@ -472,6 +585,9 @@ function AssignUserForm({
       </Button>
       {error && (
         <p className="text-destructive text-sm sm:col-span-4">{error}</p>
+      )}
+      {notice && (
+        <p className="text-sm text-emerald-600 sm:col-span-4">{notice}</p>
       )}
     </form>
   );

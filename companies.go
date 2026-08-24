@@ -1,10 +1,12 @@
 package kiosk
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/martin3zra/forge/mailer"
 	"github.com/martin3zra/forge/routing"
 	"github.com/martin3zra/playsql"
 )
@@ -36,10 +38,13 @@ func companiesShow(db *playsql.DB) routing.HandlerFunc {
 }
 
 // companiesCreate handles POST /kiosks/companies. A company always has
-// exactly one owner from the moment it exists — owner_email is required
-// (createCompanyForm.Rules) and resolved the same way companiesAttachUser
-// resolves any member: find the user by email, or create one.
-func companiesCreate(db *playsql.DB, allowlist map[string]bool) routing.HandlerFunc {
+// exactly one owner designated from the moment it exists — owner_email is
+// required (createCompanyForm.Rules). If that email matches an existing
+// user they're attached immediately (role "owner"); otherwise, matching
+// companiesAttachUser, an invitation is sent rather than eagerly creating
+// an account nobody's confirmed yet — the company itself is still created
+// either way, just without a company_users row until the invite is accepted.
+func companiesCreate(db *playsql.DB, m mailer.Mailer, allowlist map[string]bool, appURL string) routing.HandlerFunc {
 	return routing.WithRequest(func(ctx *routing.Context, form *createCompanyForm) {
 		email := strings.ToLower(strings.TrimSpace(form.OwnerEmail))
 		if allowlist[email] {
@@ -66,24 +71,31 @@ func companiesCreate(db *playsql.DB, allowlist map[string]bool) routing.HandlerF
 			return
 		}
 
-		owner, err := findOrCreateCompanyUser(ctx, db, email, form.OwnerName)
-		if err != nil {
+		var owner kioskUserModel
+		err = db.Model(&kioskUserModel{}).WhereEq("email", email).First(ctx.Request.Context(), &owner)
+		switch {
+		case err == nil:
+			err = db.Model(&companyUserModel{}).Create(ctx.Request.Context(), &companyUserModel{}, map[string]any{
+				"company_id": row.ID,
+				"user_id":    owner.ID,
+				"role_id":    ownerRole.ID,
+			})
+			if err != nil {
+				ctx.Error(err)
+				return
+			}
+			ctx.JSON(http.StatusCreated, map[string]any{"company": row, "owner_invited": false})
+		case errors.Is(err, playsql.ErrNotFound):
+			invite, inviteErr := createOrRefreshInvitation(ctx, db, row.ID, ownerRole.ID, form.OwnerName, email)
+			if inviteErr != nil {
+				ctx.Error(inviteErr)
+				return
+			}
+			sendInvitationEmail(m, invite, row.Name, appURL)
+			ctx.JSON(http.StatusCreated, map[string]any{"company": row, "owner_invited": true})
+		default:
 			ctx.Error(err)
-			return
 		}
-
-		var membership companyUserModel
-		err = db.Model(&companyUserModel{}).Create(ctx.Request.Context(), &membership, map[string]any{
-			"company_id": row.ID,
-			"user_id":    owner.ID,
-			"role_id":    ownerRole.ID,
-		})
-		if err != nil {
-			ctx.Error(err)
-			return
-		}
-
-		ctx.JSON(http.StatusCreated, row)
 	})
 }
 

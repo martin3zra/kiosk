@@ -63,6 +63,7 @@ func PlanUninstall(ctx context.Context, root string, db *playsql.DB) (*Uninstall
 		{"company_addons", func(ctx context.Context) (int64, error) { return db.Model(&companyAddonModel{}).Count(ctx) }},
 		{"company_users", func(ctx context.Context) (int64, error) { return db.Model(&companyUserModel{}).Count(ctx) }},
 		{"impersonation_sessions", func(ctx context.Context) (int64, error) { return db.Model(&impersonationSessionModel{}).Count(ctx) }},
+		{"invitations", func(ctx context.Context) (int64, error) { return db.Model(&invitationModel{}).Count(ctx) }},
 	}
 	for _, c := range counters {
 		count, err := c.count(ctx)
