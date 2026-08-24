@@ -1,5 +1,8 @@
-import { Link } from "@inertiajs/react";
+import { Link, usePage } from "@inertiajs/react";
 import { type PropsWithChildren } from "react";
+
+import { useCsrfHeaders } from "@/lib/csrf";
+import { type SharedProps } from "@/types";
 
 // Kiosk's own shell — deliberately not AppShell/AppSidebar. Kiosk is a
 // separate console bolted onto spark, not a section of the main app, so it
@@ -9,6 +12,9 @@ export default function KioskLayout({
   title,
   children,
 }: PropsWithChildren<{ title: string }>) {
+  const { auth } = usePage<SharedProps>().props;
+  const headers = useCsrfHeaders();
+
   return (
     <div className="bg-background min-h-screen">
       <header className="border-b border-neutral-800 bg-neutral-950 text-neutral-100">
@@ -22,12 +28,23 @@ export default function KioskLayout({
               Dashboard
             </Link>
           </nav>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-4 text-xs text-neutral-400">
+            {/* /home redirects developers straight back here unless they're
+                impersonating (see spark's RedirectDeveloperToKiosk) — only
+                show this link when it would actually go somewhere. */}
+            {auth.isImpersonating && (
+              <Link href="/home" className="hover:text-neutral-100">
+                ← Back to app
+              </Link>
+            )}
             <Link
-              href="/home"
-              className="text-xs text-neutral-400 hover:text-neutral-100"
+              method="post"
+              href="/logout"
+              as="button"
+              headers={headers}
+              className="hover:text-neutral-100"
             >
-              ← Back to app
+              Log out
             </Link>
           </div>
         </div>
