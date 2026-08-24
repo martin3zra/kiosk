@@ -48,6 +48,11 @@ func PlanUninstall(ctx context.Context, root string, db *playsql.DB) (*Uninstall
 		plan.Files = append(plan.Files, PlannedFile{Kind: f.Kind, Path: f.Path, Status: status, SHA256: f.SHA256})
 	}
 
+	// roles is deliberately not tracked here: unlike every other table,
+	// it's never empty on a normal install (kiosk's own seed migration
+	// always puts owner/admin in it), so counting it would flag every
+	// uninstall as having "data at risk" even on a project that never
+	// created a single company.
 	counters := []struct {
 		table string
 		count func(context.Context) (int64, error)

@@ -10,12 +10,21 @@ import (
 
 type createCompanyForm struct {
 	support.FormRequest
-	Name   string `json:"name"`
-	PlanID *int   `json:"plan_id"`
+	Name       string  `json:"name"`
+	Identifier *string `json:"identifier"`
+	// OwnerName/OwnerEmail are required: a company always has exactly one
+	// owner from the moment it's created, never an in-between state with
+	// none. Finds or creates the user by email, same as
+	// companiesAttachUser — OwnerName is needed for the same reason
+	// assignCompanyUserForm.Name is: Kiosk has no invite/accept flow to let
+	// a brand-new user set their own name later.
+	OwnerName  string `json:"owner_name"`
+	OwnerEmail string `json:"owner_email"`
+	PlanID     *int   `json:"plan_id"`
 }
 
 func (f *createCompanyForm) Rules() map[string]any {
-	return map[string]any{"name": "required"}
+	return map[string]any{"name": "required", "owner_name": "required", "owner_email": "required"}
 }
 
 type updateCompanyStatusForm struct {

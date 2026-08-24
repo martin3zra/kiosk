@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-//go:embed migrations/*.yaml
+//go:embed migrations/*.yaml migrations/*.sql
 var migrationsFS embed.FS
 
 //go:embed pages/*.tsx

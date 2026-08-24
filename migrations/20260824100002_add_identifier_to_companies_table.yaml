@@ -1,0 +1,13 @@
+up:
+  company:
+    action: alter
+    table: companies
+    add_columns:
+      identifier: string:255 nullable
+
+down:
+  company:
+    action: alter
+    table: companies
+    drop_columns:
+      - identifier

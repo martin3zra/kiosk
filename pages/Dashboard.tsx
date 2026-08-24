@@ -1,5 +1,5 @@
 import { router } from "@inertiajs/react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,16 @@ interface Member {
   role: string;
 }
 
+// rolesIndex returns the raw roleModel rows — no custom json tags, same
+// convention companiesIndex/plansIndex/usersIndex already use (capitalized
+// Go field names as JSON keys), unlike memberRow/CompanyRow below, which are
+// purpose-built response shapes with explicit lowercase tags.
+interface Role {
+  UUID: string;
+  Name: string;
+  Description: string | null;
+}
+
 interface DashboardProps {
   stats: { companies: number; plans: number; users: number };
   companies: CompanyRow[];
@@ -29,8 +39,25 @@ interface DashboardProps {
 // Kiosk's endpoints are a plain JSON API, not Inertia-rendered responses —
 // every mutation here goes through fetch() + useCsrfHeaders(), not
 // useForm()/router.post(), which expect an Inertia-formatted response.
+//
+// Every fetch() call needs Accept: application/json, not just Content-Type
+// — forge's WithRequest checks Accept to decide whether a validation
+// failure gets a clean JSON error response or a session-flash fallback that
+// panics outside a browser-form submission (see roles.go's package doc /
+// the kiosk repo's TestCompaniesCreateRequiresOwner for the full story).
+// Centralized here once rather than on every call site below.
 export default function Dashboard({ stats, companies }: DashboardProps) {
-  const headers = useCsrfHeaders();
+  const headers = { ...useCsrfHeaders(), Accept: "application/json" };
+  const [roles, setRoles] = useState<Role[]>([]);
+
+  useEffect(() => {
+    fetch("/kiosks/roles", { headers })
+      .then((res) => (res.ok ? res.json() : []))
+      .then(setRoles)
+      .catch(() => setRoles([]));
+    // Fetch once on mount — the role list doesn't change during a visit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <KioskLayout title="Dashboard">
@@ -44,7 +71,7 @@ export default function Dashboard({ stats, companies }: DashboardProps) {
 
       <div className="mt-6 space-y-3">
         {companies.map((c) => (
-          <CompanyCard key={c.uuid} company={c} headers={headers} />
+          <CompanyCard key={c.uuid} company={c} headers={headers} roles={roles} />
         ))}
         {companies.length === 0 && (
           <p className="text-muted-foreground py-6 text-center text-sm">
@@ -84,6 +111,9 @@ function StatusBadge({ status }: { status: string }) {
 
 function NewCompanyForm({ headers }: { headers: Record<string, string> }) {
   const [name, setName] = useState("");
+  const [identifier, setIdentifier] = useState("");
+  const [ownerName, setOwnerName] = useState("");
+  const [ownerEmail, setOwnerEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -94,7 +124,12 @@ function NewCompanyForm({ headers }: { headers: Record<string, string> }) {
     const res = await fetch("/kiosks/companies", {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({
+        name,
+        identifier: identifier || undefined,
+        owner_name: ownerName,
+        owner_email: ownerEmail,
+      }),
     });
     setSubmitting(false);
     if (!res.ok) {
@@ -103,16 +138,19 @@ function NewCompanyForm({ headers }: { headers: Record<string, string> }) {
       return;
     }
     setName("");
+    setIdentifier("");
+    setOwnerName("");
+    setOwnerEmail("");
     router.reload({ only: ["companies", "stats"] });
   }
 
   return (
     <form
       onSubmit={submit}
-      className="mt-6 flex items-end gap-3 rounded-md border p-4"
+      className="mt-6 grid gap-3 rounded-md border p-4 sm:grid-cols-4 sm:items-end"
     >
-      <div className="grid flex-1 gap-2">
-        <Label htmlFor="company-name">New company</Label>
+      <div className="grid gap-1 sm:col-span-2">
+        <Label htmlFor="company-name">Company name</Label>
         <Input
           id="company-name"
           value={name}
@@ -121,10 +159,40 @@ function NewCompanyForm({ headers }: { headers: Record<string, string> }) {
           required
         />
       </div>
-      <Button type="submit" disabled={submitting || !name.trim()}>
-        {submitting ? "Creating…" : "Create"}
+      <div className="grid gap-1 sm:col-span-2">
+        <Label htmlFor="company-identifier">Identifier (RNC)</Label>
+        <Input
+          id="company-identifier"
+          value={identifier}
+          onChange={(e) => setIdentifier(e.target.value)}
+          placeholder="1-23-45678-9"
+        />
+      </div>
+      <div className="grid gap-1 sm:col-span-2">
+        <Label htmlFor="company-owner-name">Owner name</Label>
+        <Input
+          id="company-owner-name"
+          value={ownerName}
+          onChange={(e) => setOwnerName(e.target.value)}
+          required
+        />
+      </div>
+      <div className="grid gap-1">
+        <Label htmlFor="company-owner-email">Owner email</Label>
+        <Input
+          id="company-owner-email"
+          type="email"
+          value={ownerEmail}
+          onChange={(e) => setOwnerEmail(e.target.value)}
+          required
+        />
+      </div>
+      <Button type="submit" disabled={submitting}>
+        {submitting ? "Creating…" : "Create company"}
       </Button>
-      {error && <p className="text-destructive text-sm">{error}</p>}
+      {error && (
+        <p className="text-destructive text-sm sm:col-span-4">{error}</p>
+      )}
     </form>
   );
 }
@@ -132,9 +200,11 @@ function NewCompanyForm({ headers }: { headers: Record<string, string> }) {
 function CompanyCard({
   company,
   headers,
+  roles,
 }: {
   company: CompanyRow;
   headers: Record<string, string>;
+  roles: Role[];
 }) {
   const [expanded, setExpanded] = useState(false);
   const [members, setMembers] = useState<Member[] | null>(null);
@@ -179,6 +249,7 @@ function CompanyCard({
               company={company}
               members={members}
               headers={headers}
+              roles={roles}
               onChange={loadMembers}
             />
           )}
@@ -192,11 +263,13 @@ function MembersPanel({
   company,
   members,
   headers,
+  roles,
   onChange,
 }: {
   company: CompanyRow;
   members: Member[];
   headers: Record<string, string>;
+  roles: Role[];
   onChange: () => void;
 }) {
   return (
@@ -233,7 +306,12 @@ function MembersPanel({
         </tbody>
       </table>
 
-      <AssignUserForm company={company} headers={headers} onChange={onChange} />
+      <AssignUserForm
+        company={company}
+        headers={headers}
+        roles={roles}
+        onChange={onChange}
+      />
     </div>
   );
 }
@@ -317,10 +395,12 @@ function MemberRow({
 function AssignUserForm({
   company,
   headers,
+  roles,
   onChange,
 }: {
   company: CompanyRow;
   headers: Record<string, string>;
+  roles: Role[];
   onChange: () => void;
 }) {
   const [name, setName] = useState("");
@@ -373,12 +453,19 @@ function AssignUserForm({
       </div>
       <div className="grid gap-1">
         <Label htmlFor={`${company.uuid}-role`}>Role</Label>
-        <Input
+        <select
           id={`${company.uuid}-role`}
           value={role}
           onChange={(e) => setRole(e.target.value)}
-          placeholder="member"
-        />
+          className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
+        >
+          <option value="">Default (admin)</option>
+          {roles.map((r) => (
+            <option key={r.UUID} value={r.Name}>
+              {r.Name}
+            </option>
+          ))}
+        </select>
       </div>
       <Button type="submit" disabled={submitting}>
         {submitting ? "Assigning…" : "Assign user"}

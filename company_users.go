@@ -35,9 +35,18 @@ func companiesAttachUser(db *playsql.DB, allowlist map[string]bool) routing.Hand
 			return
 		}
 
-		role := form.Role
-		if role == "" {
-			role = "member"
+		roleName := form.Role
+		if roleName == "" {
+			roleName = "admin"
+		}
+		role, err := findRoleByName(ctx, db, roleName)
+		if err != nil {
+			if errors.Is(err, playsql.ErrNotFound) {
+				ctx.JSON(http.StatusUnprocessableEntity, map[string]any{"error": "unknown role: " + roleName})
+				return
+			}
+			ctx.Error(err)
+			return
 		}
 
 		company, err := companiesShowRow(ctx, db, companyUUID)
@@ -56,13 +65,12 @@ func companiesAttachUser(db *playsql.DB, allowlist map[string]bool) routing.Hand
 		err = db.Model(&companyUserModel{}).WhereEq("user_id", user.ID).First(ctx.Request.Context(), &existing)
 		switch {
 		case err == nil && existing.CompanyID == company.ID:
-			_, updateErr := db.Model(&companyUserModel{}).WhereEq("id", existing.ID).Update(ctx.Request.Context(), map[string]any{"role": role})
+			_, updateErr := db.Model(&companyUserModel{}).WhereEq("id", existing.ID).Update(ctx.Request.Context(), map[string]any{"role_id": role.ID})
 			if updateErr != nil {
 				ctx.Error(updateErr)
 				return
 			}
-			existing.Role = role
-			ctx.JSON(http.StatusOK, existing)
+			ctx.JSON(http.StatusOK, memberRow{UUID: user.UUID, Name: user.Name, Email: user.Email, Role: role.Name})
 			return
 		case err == nil:
 			ctx.JSON(http.StatusUnprocessableEntity, map[string]any{"error": "user already belongs to a different company"})
@@ -76,14 +84,24 @@ func companiesAttachUser(db *playsql.DB, allowlist map[string]bool) routing.Hand
 		err = db.Model(&companyUserModel{}).Create(ctx.Request.Context(), &membership, map[string]any{
 			"company_id": company.ID,
 			"user_id":    user.ID,
-			"role":       role,
+			"role_id":    role.ID,
 		})
 		if err != nil {
 			ctx.Error(err)
 			return
 		}
-		ctx.JSON(http.StatusCreated, membership)
+		ctx.JSON(http.StatusCreated, memberRow{UUID: user.UUID, Name: user.Name, Email: user.Email, Role: role.Name})
 	})
+}
+
+// memberRow is a company_users row joined with its user and role names —
+// what companiesAttachUser and companiesUsersIndex both return, since the
+// frontend needs a display name for the role, not its internal id.
+type memberRow struct {
+	UUID  string `json:"uuid"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Role  string `json:"role"`
 }
 
 // companiesUsersIndex handles GET /kiosks/companies/:id/users. Each row's
@@ -107,12 +125,6 @@ func companiesUsersIndex(db *playsql.DB) routing.HandlerFunc {
 			return
 		}
 
-		type memberRow struct {
-			UUID  string `json:"uuid"`
-			Name  string `json:"name"`
-			Email string `json:"email"`
-			Role  string `json:"role"`
-		}
 		rows := make([]memberRow, 0, len(memberships))
 		for _, m := range memberships {
 			var u kioskUserModel
@@ -120,7 +132,16 @@ func companiesUsersIndex(db *playsql.DB) routing.HandlerFunc {
 				ctx.Error(err)
 				return
 			}
-			rows = append(rows, memberRow{UUID: u.UUID, Name: u.Name, Email: u.Email, Role: m.Role})
+			roleName := ""
+			if m.RoleID != nil {
+				var role roleModel
+				if err := db.Model(&roleModel{}).Find(ctx.Request.Context(), &role, *m.RoleID); err != nil {
+					ctx.Error(err)
+					return
+				}
+				roleName = role.Name
+			}
+			rows = append(rows, memberRow{UUID: u.UUID, Name: u.Name, Email: u.Email, Role: roleName})
 		}
 		ctx.JSON(http.StatusOK, rows)
 	}

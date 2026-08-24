@@ -2,6 +2,7 @@ package kiosk
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/martin3zra/forge/routing"
@@ -34,19 +35,54 @@ func companiesShow(db *playsql.DB) routing.HandlerFunc {
 	}
 }
 
-func companiesCreate(db *playsql.DB) routing.HandlerFunc {
+// companiesCreate handles POST /kiosks/companies. A company always has
+// exactly one owner from the moment it exists — owner_email is required
+// (createCompanyForm.Rules) and resolved the same way companiesAttachUser
+// resolves any member: find the user by email, or create one.
+func companiesCreate(db *playsql.DB, allowlist map[string]bool) routing.HandlerFunc {
 	return routing.WithRequest(func(ctx *routing.Context, form *createCompanyForm) {
+		email := strings.ToLower(strings.TrimSpace(form.OwnerEmail))
+		if allowlist[email] {
+			ctx.JSON(http.StatusUnprocessableEntity, map[string]any{"error": "developer accounts cannot own a company"})
+			return
+		}
+
+		ownerRole, err := findRoleByName(ctx, db, "owner")
+		if err != nil {
+			ctx.Error(err)
+			return
+		}
+
 		var row companyModel
-		err := db.Model(&companyModel{}).Create(ctx.Request.Context(), &row, map[string]any{
-			"uuid":    uuid.NewString(),
-			"name":    form.Name,
-			"status":  "active",
-			"plan_id": form.PlanID,
+		err = db.Model(&companyModel{}).Create(ctx.Request.Context(), &row, map[string]any{
+			"uuid":       uuid.NewString(),
+			"name":       form.Name,
+			"status":     "active",
+			"identifier": form.Identifier,
+			"plan_id":    form.PlanID,
 		})
 		if err != nil {
 			ctx.Error(err)
 			return
 		}
+
+		owner, err := findOrCreateCompanyUser(ctx, db, email, form.OwnerName)
+		if err != nil {
+			ctx.Error(err)
+			return
+		}
+
+		var membership companyUserModel
+		err = db.Model(&companyUserModel{}).Create(ctx.Request.Context(), &membership, map[string]any{
+			"company_id": row.ID,
+			"user_id":    owner.ID,
+			"role_id":    ownerRole.ID,
+		})
+		if err != nil {
+			ctx.Error(err)
+			return
+		}
+
 		ctx.JSON(http.StatusCreated, row)
 	})
 }

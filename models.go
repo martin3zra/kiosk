@@ -4,15 +4,18 @@ import "time"
 
 // companyModel is the on-disk shape of a row in companies. Money columns are
 // integer cents (see forge's foundation.MoneyToText), not decimals.
+// Identifier is a free-text tax id (e.g. an RNC, EIN, or whatever the host's
+// locale uses) — Kiosk doesn't validate its format.
 type companyModel struct {
-	ID        int        `db:"id"`
-	UUID      string     `db:"uuid"`
-	Name      string     `db:"name"`
-	Status    string     `db:"status"`
-	PlanID    *int       `db:"plan_id"`
-	CreatedAt *time.Time `db:"created_at"`
-	UpdatedAt *time.Time `db:"updated_at"`
-	DeletedAt *time.Time `db:"deleted_at"`
+	ID         int        `db:"id"`
+	UUID       string     `db:"uuid"`
+	Name       string     `db:"name"`
+	Status     string     `db:"status"`
+	Identifier *string    `db:"identifier"`
+	PlanID     *int       `db:"plan_id"`
+	CreatedAt  *time.Time `db:"created_at"`
+	UpdatedAt  *time.Time `db:"updated_at"`
+	DeletedAt  *time.Time `db:"deleted_at"`
 }
 
 func (companyModel) TableName() string { return "companies" }
@@ -57,20 +60,38 @@ type companyAddonModel struct {
 
 func (companyAddonModel) TableName() string { return "company_addons" }
 
-// companyUserModel is the company <-> user pivot (company_users). Role here
-// is the user's role within that company (e.g. "owner", "member") — distinct
-// from the host app's own users.role column (spark's admin/user ACL value),
-// which Kiosk never touches.
+// companyUserModel is the company <-> user pivot (company_users). RoleID
+// points at the global roles table (roles.go) — the user's role within that
+// company (e.g. "owner", "admin") — distinct from the host app's own
+// users.role column (spark's admin/user ACL value), which Kiosk never
+// touches. No DB-level foreign key (see the migration that added this
+// column): app-enforced, matching CompanyID/UserID on this same table.
 type companyUserModel struct {
 	ID        int        `db:"id"`
 	CompanyID int        `db:"company_id"`
 	UserID    int        `db:"user_id"`
-	Role      string     `db:"role"`
+	RoleID    *int       `db:"role_id"`
 	CreatedAt *time.Time `db:"created_at"`
 	UpdatedAt *time.Time `db:"updated_at"`
 }
 
 func (companyUserModel) TableName() string { return "company_users" }
+
+// roleModel is the on-disk shape of a row in roles — a fixed global set
+// (not per-company), seeded with "owner" and "admin" by Kiosk's own
+// migration. A host project extends the list with its own migration
+// inserting more rows into this same table; Kiosk exposes no API for
+// adding roles, on purpose (see roles.go).
+type roleModel struct {
+	ID          int        `db:"id"`
+	UUID        string     `db:"uuid"`
+	Name        string     `db:"name"`
+	Description *string    `db:"description"`
+	CreatedAt   *time.Time `db:"created_at"`
+	UpdatedAt   *time.Time `db:"updated_at"`
+}
+
+func (roleModel) TableName() string { return "roles" }
 
 // impersonationSessionModel is the audit trail for impersonate.go's
 // start/stop handlers — one row per impersonation, open (ended_at nil)

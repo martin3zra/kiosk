@@ -207,7 +207,7 @@ func TestImpersonateSetsCompanyIDFromMembership(t *testing.T) {
 		t.Fatalf("seed company: %v", err)
 	}
 	if err := db.Model(&companyUserModel{}).Create(ctx0, &companyUserModel{}, map[string]any{
-		"company_id": company.ID, "user_id": target.ID, "role": "member",
+		"company_id": company.ID, "user_id": target.ID,
 	}); err != nil {
 		t.Fatalf("seed company_users row: %v", err)
 	}

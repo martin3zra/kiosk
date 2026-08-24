@@ -46,8 +46,10 @@ func Register(router *routing.Router, opts Options) {
 		rg.GroupWithMiddleware(mws, func(rg2 *routing.Router) {
 			rg2.GET("", dashboardHandler(opts.DB))
 
+			rg2.GET("/roles", rolesIndex(opts.DB))
+
 			rg2.GET("/companies", companiesIndex(opts.DB))
-			rg2.POST("/companies", companiesCreate(opts.DB))
+			rg2.POST("/companies", companiesCreate(opts.DB, opts.Allowlist))
 			rg2.GET("/companies/:id", companiesShow(opts.DB))
 			rg2.PUT("/companies/:id/status", companiesUpdateStatus(opts.DB))
 			rg2.PUT("/companies/:id/plan", companiesUpdatePlan(opts.DB))

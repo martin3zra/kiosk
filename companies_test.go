@@ -56,10 +56,19 @@ func testDB(t *testing.T) *playsql.DB {
 			uuid TEXT NOT NULL,
 			name TEXT NOT NULL,
 			status TEXT NOT NULL,
+			identifier TEXT,
 			plan_id INTEGER,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME,
 			deleted_at DATETIME
+		)`,
+		`CREATE TABLE roles (
+			id INTEGER NOT NULL PRIMARY KEY,
+			uuid TEXT NOT NULL,
+			name TEXT NOT NULL UNIQUE,
+			description TEXT,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME
 		)`,
 		`CREATE TABLE addons (
 			id INTEGER NOT NULL PRIMARY KEY,
@@ -83,7 +92,7 @@ func testDB(t *testing.T) *playsql.DB {
 			id INTEGER NOT NULL PRIMARY KEY,
 			company_id INTEGER NOT NULL,
 			user_id INTEGER NOT NULL,
-			role TEXT NOT NULL,
+			role_id INTEGER,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME
 		)`,
@@ -103,6 +112,16 @@ func testDB(t *testing.T) *playsql.DB {
 		if _, err := sqlDB.Exec(stmt); err != nil {
 			t.Fatalf("create schema: %v", err)
 		}
+	}
+
+	// Mirrors the real seed_default_roles.sql migration — every test gets
+	// the same two roles a real deployment starts with.
+	if _, err := sqlDB.Exec(
+		`INSERT INTO roles (uuid, name, description) VALUES
+			('df9202c9-466b-40e0-b434-23aaa6765af9', 'owner', 'Full control over the company, billing, and members.'),
+			('c53392c4-7511-4d45-bb06-fe8a595f1690', 'admin', 'Manage company members and settings.')`,
+	); err != nil {
+		t.Fatalf("seed roles: %v", err)
 	}
 
 	db, err := playsql.Use(sqlDB, "sqlite")
@@ -144,8 +163,9 @@ func TestCompanyPlanAddonLifecycle(t *testing.T) {
 	planID := int(plan["ID"].(float64))
 
 	// Create a company on that plan.
-	status, company := doJSON(t, companiesCreate(db), http.MethodPost,
-		`{"name":"Acme Inc","plan_id":`+strconv.Itoa(planID)+`}`, nil)
+	allowlist := map[string]bool{}
+	status, company := doJSON(t, companiesCreate(db, allowlist), http.MethodPost,
+		`{"name":"Acme Inc","owner_name":"Owner","owner_email":"owner@example.com","plan_id":`+strconv.Itoa(planID)+`}`, nil)
 	if status != http.StatusCreated {
 		t.Fatalf("companiesCreate: status=%d body=%v", status, company)
 	}

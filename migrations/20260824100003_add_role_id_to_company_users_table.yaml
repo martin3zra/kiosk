@@ -1,0 +1,21 @@
+up:
+  company_user:
+    action: alter
+    table: company_users
+    drop_columns:
+      - role
+    add_columns:
+      # No DB-level foreign key to roles.id: SQLite can't add one via ALTER
+      # (only at CREATE), and none of this table's other relationships
+      # (company_id, user_id) have one either — the app enforces these, not
+      # the schema, everywhere else here.
+      role_id: bigint nullable
+
+down:
+  company_user:
+    action: alter
+    table: company_users
+    drop_columns:
+      - role_id
+    add_columns:
+      role: string:50

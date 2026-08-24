@@ -1,0 +1,20 @@
+up:
+  role:
+    action: create
+    table: roles
+    columns:
+      id: id
+      uuid: string:36
+      name: string:50
+      description: string:255 nullable
+      created_at: timestamp useCurrent
+      updated_at: timestamp nullable
+    indexes:
+      - name: roles_name_uq
+        columns: [name]
+        unique: true
+
+down:
+  role:
+    action: drop
+    table: roles
