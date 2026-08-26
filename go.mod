@@ -4,7 +4,7 @@ go 1.25.7
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/martin3zra/forge v0.1.7
+	github.com/martin3zra/forge v0.1.11
 	github.com/martin3zra/playsql v0.6.0
 	modernc.org/sqlite v1.53.0
 )

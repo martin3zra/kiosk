@@ -105,7 +105,7 @@ func (f *addonForm) PrepareForValidation() {
 // runs — but active_from/active_until aren't struct fields the built-in
 // rule tokens can see (they arrive as JSON strings, not time.Time), so
 // there's no rule to attach them to.
-func (f *addonForm) PassedValidation() {
+func (f *addonForm) PassedValidation(validated map[string]any) {
 	if f.dateErr != nil {
 		return
 	}
