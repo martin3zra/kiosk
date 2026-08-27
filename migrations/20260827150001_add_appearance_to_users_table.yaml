@@ -1,0 +1,13 @@
+up:
+  user:
+    action: alter
+    table: users
+    add_columns:
+      appearance: string:10 default:'system'
+
+down:
+  user:
+    action: alter
+    table: users
+    drop_columns:
+      - appearance

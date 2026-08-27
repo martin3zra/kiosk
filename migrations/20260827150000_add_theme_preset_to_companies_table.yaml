@@ -1,0 +1,13 @@
+up:
+  company:
+    action: alter
+    table: companies
+    add_columns:
+      theme_preset: string:20 default:'default'
+
+down:
+  company:
+    action: alter
+    table: companies
+    drop_columns:
+      - theme_preset
