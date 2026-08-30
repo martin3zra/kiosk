@@ -98,6 +98,22 @@ type Options struct {
 	// independent of the host app's own role/permission system. Nil or
 	// empty locks everyone out — it does not disable the routes.
 	Allowlist map[string]bool
+
+	// Mailer sends the owner-invitation email when a created/attached
+	// owner's address doesn't match an existing user. mailer.Log works
+	// with no credentials.
+	Mailer mailer.Mailer
+
+	// AppURL is the host's own base URL, used to build the absolute
+	// accept-invitation link in that email.
+	AppURL string
+
+	// Events, when set, receives Kiosk's domain events. Each is dispatched
+	// inside the transaction that raised it — a listener's error rolls that
+	// operation back. It's a forge/events dispatcher parameterised on
+	// *playsql.Tx; wire listeners with events.On, then pass it here. Nil
+	// disables dispatch.
+	Events *events.Dispatcher[*playsql.Tx]
 }
 ```
 
@@ -140,6 +156,47 @@ Content-Type: application/json
 ```
 
 New companies default to `status: "active"`.
+
+## Events
+
+Kiosk raises typed domain events at points a host app may need to react to,
+through a [`forge/events`](https://github.com/martin3zra/forge/tree/main/events)
+dispatcher you pass via `Options.Events`. Each event is dispatched **inside
+the transaction that raised it**, so a listener that returns an error rolls
+that whole operation back — the place for work that must commit atomically
+with the event (seeding a new company's default rows), not best-effort side
+effects like email.
+
+```go
+import (
+	"github.com/martin3zra/forge/events"
+	"github.com/martin3zra/kiosk"
+)
+
+evts := events.NewDispatcher[*playsql.Tx]()
+
+events.On(evts, func(ctx context.Context, tx *playsql.Tx, e kiosk.CompanyCreated) error {
+	_, err := tx.Model(&locationModel{}).Insert(ctx, map[string]any{
+		"uuid": uuid.NewString(), "company_id": e.CompanyID, "name": "Main Store",
+	})
+	return err
+})
+
+kiosk.Register(s.route, kiosk.Options{
+	// … DB, Middleware, Allowlist, Mailer, AppURL …
+	Events: evts,
+})
+```
+
+The dispatcher is parameterised on `*playsql.Tx` because that's the handle
+Kiosk's own writes use. `events.On` routes by the event's concrete type —
+pass the value type (`kiosk.CompanyCreated`, not a pointer). Register
+several listeners for one event and they run in registration order; the
+first error stops the rest.
+
+| Event | Raised | Payload |
+|---|---|---|
+| `CompanyCreated` | inside `companiesCreate`'s transaction, after the row insert, before the owner is attached/invited | `CompanyID int`, `Name string` |
 
 ### Addon scheduling
 

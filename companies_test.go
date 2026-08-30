@@ -1,14 +1,17 @@
 package kiosk
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/martin3zra/forge/events"
 	"github.com/martin3zra/forge/routing"
 	"github.com/martin3zra/playsql"
 
@@ -178,7 +181,7 @@ func TestCompanyPlanAddonLifecycle(t *testing.T) {
 	// Create a company on that plan.
 	allowlist := map[string]bool{}
 	m, _ := testMailer(t)
-	status, created := doJSON(t, companiesCreate(db, m, allowlist, "https://app.example.com"), http.MethodPost,
+	status, created := doJSON(t, companiesCreate(Options{DB: db, Mailer: m, Allowlist: allowlist, AppURL: "https://app.example.com"}), http.MethodPost,
 		`{"name":"Acme Inc","owner_name":"Owner","owner_email":"owner@example.com","plan_id":`+strconv.Itoa(planID)+`}`, nil)
 	if status != http.StatusCreated {
 		t.Fatalf("companiesCreate: status=%d body=%v", status, created)
@@ -252,4 +255,80 @@ func TestCompanyPlanAddonLifecycle(t *testing.T) {
 	if err != nil || count != 0 {
 		t.Fatalf("expected 0 company_addons rows after detach, got count=%d err=%v", count, err)
 	}
+}
+
+func TestCompaniesCreateDispatchesCompanyCreated(t *testing.T) {
+	const body = `{"name":"Acme Inc","owner_name":"Owner","owner_email":"owner@example.com"}`
+
+	t.Run("listener runs in the creation transaction with the event payload", func(t *testing.T) {
+		db := testDB(t)
+		m, _ := testMailer(t)
+
+		var got CompanyCreated
+		var sawRowInTx bool
+		evts := events.NewDispatcher[*playsql.Tx]()
+		events.On(evts, func(ctx context.Context, tx *playsql.Tx, e CompanyCreated) error {
+			got = e
+			var c companyModel
+			if err := tx.Model(&companyModel{}).WhereEq("id", e.CompanyID).First(ctx, &c); err == nil && c.Name == "Acme Inc" {
+				sawRowInTx = true
+			}
+			return nil
+		})
+
+		status, created := doJSON(t, companiesCreate(Options{DB: db, Mailer: m, Allowlist: map[string]bool{}, AppURL: "https://app.example.com", Events: evts}), http.MethodPost, body, nil)
+		if status != http.StatusCreated {
+			t.Fatalf("status=%d body=%v", status, created)
+		}
+		wantID := int(created["company"].(map[string]any)["ID"].(float64))
+		if got.CompanyID == 0 || got.CompanyID != wantID {
+			t.Fatalf("event CompanyID %d, want %d", got.CompanyID, wantID)
+		}
+		if got.Name != "Acme Inc" {
+			t.Fatalf("event Name %q, want %q", got.Name, "Acme Inc")
+		}
+		if !sawRowInTx {
+			t.Fatal("listener could not read the company row through its own transaction")
+		}
+	})
+
+	t.Run("listeners run in registration order; the first error rolls the company back", func(t *testing.T) {
+		db := testDB(t)
+		m, _ := testMailer(t)
+
+		var order []int
+		evts := events.NewDispatcher[*playsql.Tx]()
+		events.On(evts, func(context.Context, *playsql.Tx, CompanyCreated) error { order = append(order, 1); return nil })
+		events.On(evts, func(context.Context, *playsql.Tx, CompanyCreated) error {
+			order = append(order, 2)
+			return errors.New("provisioning failed")
+		})
+		events.On(evts, func(context.Context, *playsql.Tx, CompanyCreated) error { order = append(order, 3); return nil })
+
+		status, _ := doJSON(t, companiesCreate(Options{DB: db, Mailer: m, Allowlist: map[string]bool{}, AppURL: "https://app.example.com", Events: evts}), http.MethodPost, body, nil)
+		if status != http.StatusInternalServerError {
+			t.Fatalf("expected 500 when a listener errors, got %d", status)
+		}
+		if len(order) != 2 || order[0] != 1 || order[1] != 2 {
+			t.Fatalf("listener order = %v, want [1 2] (3 must not run after 2 fails)", order)
+		}
+
+		count, err := db.Model(&companyModel{}).Count(context.Background())
+		if err != nil {
+			t.Fatalf("count companies: %v", err)
+		}
+		if count != 0 {
+			t.Fatalf("expected the company to be rolled back, found %d", count)
+		}
+	})
+
+	t.Run("nil Events is a no-op", func(t *testing.T) {
+		db := testDB(t)
+		m, _ := testMailer(t)
+
+		status, created := doJSON(t, companiesCreate(Options{DB: db, Mailer: m, Allowlist: map[string]bool{}, AppURL: "https://app.example.com"}), http.MethodPost, body, nil)
+		if status != http.StatusCreated {
+			t.Fatalf("status=%d body=%v", status, created)
+		}
+	})
 }

@@ -16,8 +16,8 @@ github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
 github.com/lib/pq v1.12.3 h1:tTWxr2YLKwIvK90ZXEw8GP7UFHtcbTtty8zsI+YjrfQ=
 github.com/lib/pq v1.12.3/go.mod h1:/p+8NSbOcwzAEI7wiMXFlgydTwcgTr3OSKMsD2BitpA=
-github.com/martin3zra/forge v0.1.11 h1:KZIJzftx7jPC9WSJeY8BB9DqC06JICUGs5/i8HLFpmI=
-github.com/martin3zra/forge v0.1.11/go.mod h1:Gf5x+jLooGNDVFEx3GGcEdOaf5i+0kEmuCqPFg5htDk=
+github.com/martin3zra/forge v0.2.0 h1:k+4GnTTVpQ69HQpK7hhnPHbnOKCmZQSbk71NWukuk5s=
+github.com/martin3zra/forge v0.2.0/go.mod h1:3SPsGKrjeO+ZO65hKFdWDeB/7JoWfNEFrbsowPstjk0=
 github.com/martin3zra/playsql v0.6.0 h1:GIcSrqg9TvVNA2A3rXdUX6PkBtwh+alFHLJTPm8xHoo=
 github.com/martin3zra/playsql v0.6.0/go.mod h1:nItoVH1wwETVqoJvBqRq5Mmf1EHtBQTq6zXgL4MguiM=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=

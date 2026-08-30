@@ -18,7 +18,7 @@ func TestCompanyUserAssignment(t *testing.T) {
 	m, _ := testMailer(t)
 	allowlist := map[string]bool{"dev@example.com": true}
 
-	status, company := doJSON(t, companiesCreate(db, m, allowlist, "https://app.example.com"), http.MethodPost,
+	status, company := doJSON(t, companiesCreate(Options{DB: db, Mailer: m, Allowlist: allowlist, AppURL: "https://app.example.com"}), http.MethodPost,
 		`{"name":"Acme Inc","owner_name":"Owner","owner_email":"owner@example.com"}`, nil)
 	if status != http.StatusCreated {
 		t.Fatalf("companiesCreate: status=%d body=%v", status, company)
@@ -84,7 +84,7 @@ func TestCompanyUserAssignment(t *testing.T) {
 	}
 
 	// A second company can't claim an already-assigned user.
-	status, secondCompany := doJSON(t, companiesCreate(db, m, allowlist, "https://app.example.com"), http.MethodPost,
+	status, secondCompany := doJSON(t, companiesCreate(Options{DB: db, Mailer: m, Allowlist: allowlist, AppURL: "https://app.example.com"}), http.MethodPost,
 		`{"name":"Globex","owner_name":"Owner Two","owner_email":"owner2@example.com"}`, nil)
 	if status != http.StatusCreated {
 		t.Fatalf("companiesCreate (second): status=%d body=%v", status, secondCompany)
@@ -136,7 +136,7 @@ func TestCompaniesCreateRequiresOwner(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	ctx := &routing.Context{Response: rec, Request: req}
-	companiesCreate(db, m, allowlist, "https://app.example.com")(ctx)
+	companiesCreate(Options{DB: db, Mailer: m, Allowlist: allowlist, AppURL: "https://app.example.com"})(ctx)
 
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422 creating a company with no owner, got %d body=%s", rec.Code, rec.Body.String())
@@ -148,7 +148,7 @@ func TestCompaniesCreateRejectsDeveloperOwner(t *testing.T) {
 	m, _ := testMailer(t)
 	allowlist := map[string]bool{"dev@example.com": true}
 
-	status, body := doJSON(t, companiesCreate(db, m, allowlist, "https://app.example.com"), http.MethodPost,
+	status, body := doJSON(t, companiesCreate(Options{DB: db, Mailer: m, Allowlist: allowlist, AppURL: "https://app.example.com"}), http.MethodPost,
 		`{"name":"Acme Inc","owner_name":"Dev","owner_email":"dev@example.com"}`, nil)
 	if status != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422 for a developer-email owner, got %d body=%v", status, body)

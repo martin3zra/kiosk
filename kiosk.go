@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/martin3zra/forge/auth"
+	"github.com/martin3zra/forge/events"
 	"github.com/martin3zra/forge/foundation"
 	"github.com/martin3zra/forge/mailer"
 	"github.com/martin3zra/forge/routing"
@@ -49,6 +50,14 @@ type Options struct {
 	// no trailing slash needed) — used to build the absolute accept-
 	// invitation link an email recipient can actually click.
 	AppURL string
+
+	// Events, when set, receives kiosk's domain events (CompanyCreated, …)
+	// as they occur. Each is dispatched inside the transaction that raised
+	// it, so a listener's error rolls that operation back — the place to
+	// provision per-company defaults Kiosk knows nothing about (a starter
+	// location, seed catalog rows). Build it with events.NewDispatcher, wire
+	// listeners with events.On (see events.go); nil disables dispatch.
+	Events *events.Dispatcher[*playsql.Tx]
 }
 
 // Register mounts Kiosk's routes on router at /kiosks.
@@ -62,7 +71,7 @@ func Register(router *routing.Router, opts Options) {
 			rg2.GET("/roles", rolesIndex(opts.DB))
 
 			rg2.GET("/companies", companiesIndex(opts.DB))
-			rg2.POST("/companies", companiesCreate(opts.DB, opts.Mailer, opts.Allowlist, opts.AppURL))
+			rg2.POST("/companies", companiesCreate(opts))
 			rg2.GET("/companies/:id", companiesShow(opts.DB))
 			rg2.PUT("/companies/:id/status", companiesUpdateStatus(opts.DB))
 			rg2.PUT("/companies/:id/plan", companiesUpdatePlan(opts.DB))

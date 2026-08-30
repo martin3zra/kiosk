@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/martin3zra/forge/mailer"
 	"github.com/martin3zra/forge/routing"
 	"github.com/martin3zra/playsql"
 )
@@ -44,7 +43,15 @@ func companiesShow(db *playsql.DB) routing.HandlerFunc {
 // companiesAttachUser, an invitation is sent rather than eagerly creating
 // an account nobody's confirmed yet — the company itself is still created
 // either way, just without a company_users row until the invite is accepted.
-func companiesCreate(db *playsql.DB, m mailer.Mailer, allowlist map[string]bool, appURL string) routing.HandlerFunc {
+//
+// The company row insert and the CompanyCreated event dispatch run together
+// in one transaction: a host that provisions per-company defaults from a
+// listener never ends up with a company that's missing them. The owner
+// attach/invite step stays outside that transaction — it already tolerates
+// partial success (a failed invitation email doesn't undo the company).
+func companiesCreate(opts Options) routing.HandlerFunc {
+	db, m, allowlist, appURL := opts.DB, opts.Mailer, opts.Allowlist, opts.AppURL
+
 	return routing.WithRequest(func(ctx *routing.Context, form *createCompanyForm) {
 		email := strings.ToLower(strings.TrimSpace(form.OwnerEmail))
 		if allowlist[email] {
@@ -59,12 +66,20 @@ func companiesCreate(db *playsql.DB, m mailer.Mailer, allowlist map[string]bool,
 		}
 
 		var row companyModel
-		err = db.Model(&companyModel{}).Create(ctx.Request.Context(), &row, map[string]any{
-			"uuid":       uuid.NewString(),
-			"name":       form.Name,
-			"status":     "active",
-			"identifier": form.Identifier,
-			"plan_id":    form.PlanID,
+		err = db.Tx(ctx.Request.Context(), func(tx *playsql.Tx) error {
+			if txErr := tx.Model(&companyModel{}).Create(ctx.Request.Context(), &row, map[string]any{
+				"uuid":       uuid.NewString(),
+				"name":       form.Name,
+				"status":     "active",
+				"identifier": form.Identifier,
+				"plan_id":    form.PlanID,
+			}); txErr != nil {
+				return txErr
+			}
+			return opts.Events.Dispatch(ctx.Request.Context(), tx, CompanyCreated{
+				CompanyID: row.ID,
+				Name:      row.Name,
+			})
 		})
 		if err != nil {
 			ctx.Error(err)

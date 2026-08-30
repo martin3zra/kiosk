@@ -81,7 +81,7 @@ func TestCompaniesAttachUserInvitesUnknownEmail(t *testing.T) {
 	m, log := testMailer(t)
 	allowlist := map[string]bool{}
 
-	status, company := doJSON(t, companiesCreate(db, m, allowlist, "https://app.example.com"), http.MethodPost,
+	status, company := doJSON(t, companiesCreate(Options{DB: db, Mailer: m, Allowlist: allowlist, AppURL: "https://app.example.com"}), http.MethodPost,
 		`{"name":"Acme Inc","owner_name":"Owner","owner_email":"owner@example.com"}`, nil)
 	if status != http.StatusCreated {
 		t.Fatalf("companiesCreate: status=%d body=%v", status, company)
@@ -117,7 +117,7 @@ func TestInvitationAcceptCreatesAccountAndLogsIn(t *testing.T) {
 	m, _ := testMailer(t)
 	allowlist := map[string]bool{}
 
-	status, company := doJSON(t, companiesCreate(db, m, allowlist, "https://app.example.com"), http.MethodPost,
+	status, company := doJSON(t, companiesCreate(Options{DB: db, Mailer: m, Allowlist: allowlist, AppURL: "https://app.example.com"}), http.MethodPost,
 		`{"name":"Acme Inc","owner_name":"Owner","owner_email":"owner@example.com"}`, nil)
 	if status != http.StatusCreated {
 		t.Fatalf("companiesCreate: status=%d body=%v", status, company)
@@ -189,7 +189,7 @@ func TestInvitationAcceptClearsStaleImpersonationMarker(t *testing.T) {
 	m, _ := testMailer(t)
 	allowlist := map[string]bool{}
 
-	status, company := doJSON(t, companiesCreate(db, m, allowlist, "https://app.example.com"), http.MethodPost,
+	status, company := doJSON(t, companiesCreate(Options{DB: db, Mailer: m, Allowlist: allowlist, AppURL: "https://app.example.com"}), http.MethodPost,
 		`{"name":"Acme Inc","owner_name":"Owner","owner_email":"owner@example.com"}`, nil)
 	if status != http.StatusCreated {
 		t.Fatalf("companiesCreate: status=%d body=%v", status, company)
