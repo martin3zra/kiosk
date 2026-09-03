@@ -76,12 +76,14 @@ func Register(router *routing.Router, opts Options) {
 			rg2.PUT("/companies/:id/status", companiesUpdateStatus(opts.DB))
 			rg2.PUT("/companies/:id/plan", companiesUpdatePlan(opts.DB))
 
+			members := NewMemberService(MemberServiceOptions{DB: opts.DB, Mailer: opts.Mailer, AppURL: opts.AppURL})
+
 			rg2.GET("/companies/:id/users", companiesUsersIndex(opts.DB))
 			rg2.POST("/companies/:id/users", companiesAttachUser(opts.DB, opts.Mailer, opts.Allowlist, opts.AppURL))
 			rg2.DELETE("/companies/:id/users/:userId", companiesDetachUser(opts.DB))
 
-			rg2.GET("/companies/:id/invitations", companiesInvitationsIndex(opts.DB))
-			rg2.POST("/companies/:id/invitations/:invitationId/resend", companiesInvitationsResend(opts.DB, opts.Mailer, opts.AppURL))
+			rg2.GET("/companies/:id/invitations", companiesInvitationsIndex(members))
+			rg2.POST("/companies/:id/invitations/:invitationId/resend", companiesInvitationsResend(members))
 
 			rg2.GET("/plans", plansIndex(opts.DB))
 			rg2.POST("/plans", plansCreate(opts.DB))

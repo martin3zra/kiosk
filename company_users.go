@@ -60,7 +60,7 @@ func companiesAttachUser(db *playsql.DB, m mailer.Mailer, allowlist map[string]b
 		var user kioskUserModel
 		err = db.Model(&kioskUserModel{}).WhereEq("email", email).First(ctx.Request.Context(), &user)
 		if errors.Is(err, playsql.ErrNotFound) {
-			invite, inviteErr := createOrRefreshInvitation(ctx, db, company.ID, role.ID, form.Name, email)
+			invite, inviteErr := createOrRefreshInvitation(ctx.Request.Context(), db, company.ID, role.ID, form.Name, email)
 			if inviteErr != nil {
 				ctx.Error(inviteErr)
 				return

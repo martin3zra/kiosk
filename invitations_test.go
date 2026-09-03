@@ -44,7 +44,7 @@ func TestCreateOrRefreshInvitation(t *testing.T) {
 		t.Fatalf("seed role lookup: %v", err)
 	}
 
-	first, err := createOrRefreshInvitation(ctx, db, 1, role.ID, "Grace", "grace@example.com")
+	first, err := createOrRefreshInvitation(ctx.Request.Context(), db, 1, role.ID, "Grace", "grace@example.com")
 	if err != nil {
 		t.Fatalf("createOrRefreshInvitation: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestCreateOrRefreshInvitation(t *testing.T) {
 
 	// A second invite to the same (company, email) refreshes the existing
 	// row — new token, same row — rather than creating a duplicate.
-	second, err := createOrRefreshInvitation(ctx, db, 1, role.ID, "Grace", "grace@example.com")
+	second, err := createOrRefreshInvitation(ctx.Request.Context(), db, 1, role.ID, "Grace", "grace@example.com")
 	if err != nil {
 		t.Fatalf("createOrRefreshInvitation (refresh): %v", err)
 	}

@@ -101,7 +101,7 @@ func companiesCreate(opts Options) routing.HandlerFunc {
 			}
 			ctx.JSON(http.StatusCreated, map[string]any{"company": row, "owner_invited": false})
 		case errors.Is(err, playsql.ErrNotFound):
-			invite, inviteErr := createOrRefreshInvitation(ctx, db, row.ID, ownerRole.ID, form.OwnerName, email)
+			invite, inviteErr := createOrRefreshInvitation(ctx.Request.Context(), db, row.ID, ownerRole.ID, form.OwnerName, email)
 			if inviteErr != nil {
 				ctx.Error(inviteErr)
 				return

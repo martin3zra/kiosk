@@ -1,6 +1,7 @@
 package kiosk
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -31,12 +32,14 @@ type invitationMail struct {
 func (m invitationMail) Subject() string {
 	return fmt.Sprintf("You've been invited to join %s", m.companyName)
 }
+
 // To returns nil, not the invitee — sendInvitationEmail already sets them
 // as the primary recipient via mailer.Mailer's own .To(...). Mailable.To()
 // is for *additional* recipients (mailer.go's sendViaAPI/sendViaSMTP both
 // append it to the primary), so returning the same person here would send
 // the invitation to them twice under the API driver.
 func (m invitationMail) To() []mailer.Individual { return nil }
+
 // Content path is rooted the way forge itself roots template lookups (see
 // forge/routing/context.go's "resources/views/error/500.html") — relative
 // to the host's module root, not to any resources sub-package's own
@@ -69,7 +72,7 @@ func (m invitationMail) Attachments() []mailer.Attachment { return nil }
 // (company, email) — a repeat invite to the same person for the same
 // company regenerates the token/expiry on the existing row instead of
 // piling up dead duplicates, matching what "resend" would do anyway.
-func createOrRefreshInvitation(ctx *routing.Context, db *playsql.DB, companyID, roleID int, name, email string) (invitationModel, error) {
+func createOrRefreshInvitation(ctx context.Context, db *playsql.DB, companyID, roleID int, name, email string) (invitationModel, error) {
 	token, err := randomToken()
 	if err != nil {
 		return invitationModel{}, err
@@ -79,10 +82,10 @@ func createOrRefreshInvitation(ctx *routing.Context, db *playsql.DB, companyID, 
 	var existing invitationModel
 	err = db.Model(&invitationModel{}).
 		WhereEq("company_id", companyID).WhereEq("email", email).WhereNull("accepted_at").
-		First(ctx.Request.Context(), &existing)
+		First(ctx, &existing)
 	switch {
 	case err == nil:
-		_, updateErr := db.Model(&invitationModel{}).WhereEq("id", existing.ID).Update(ctx.Request.Context(), map[string]any{
+		_, updateErr := db.Model(&invitationModel{}).WhereEq("id", existing.ID).Update(ctx, map[string]any{
 			"role_id":    roleID,
 			"name":       name,
 			"token":      token,
@@ -98,7 +101,7 @@ func createOrRefreshInvitation(ctx *routing.Context, db *playsql.DB, companyID, 
 	}
 
 	var invite invitationModel
-	err = db.Model(&invitationModel{}).Create(ctx.Request.Context(), &invite, map[string]any{
+	err = db.Model(&invitationModel{}).Create(ctx, &invite, map[string]any{
 		"uuid":       uuid.NewString(),
 		"company_id": companyID,
 		"role_id":    roleID,
@@ -132,23 +135,20 @@ func randomToken() (string, error) {
 // companiesInvitationsIndex handles GET /kiosks/companies/:id/invitations —
 // pending (not accepted, not expired) invitations, for a "waiting to join"
 // list alongside the members table.
-func companiesInvitationsIndex(db *playsql.DB) routing.HandlerFunc {
+func companiesInvitationsIndex(svc *MemberService) routing.HandlerFunc {
 	return func(ctx *routing.Context) {
 		companyUUID, ok := paramUUID(ctx, "id")
 		if !ok {
 			return
 		}
-		company, err := companiesShowRow(ctx, db, companyUUID)
+		company, err := companiesShowRow(ctx, svc.db, companyUUID)
 		if err != nil {
 			ctx.Error(err)
 			return
 		}
 
-		var invites []invitationModel
-		if err := db.Model(&invitationModel{}).
-			WhereEq("company_id", company.ID).WhereNull("accepted_at").
-			OrderBy("created_at", playsql.Desc).
-			Get(ctx.Request.Context(), &invites); err != nil {
+		invites, err := svc.PendingInvitations(ctx.Request.Context(), company.ID)
+		if err != nil {
 			ctx.Error(err)
 			return
 		}
@@ -161,23 +161,16 @@ func companiesInvitationsIndex(db *playsql.DB) routing.HandlerFunc {
 			ExpiresAt string `json:"expires_at"`
 			Expired   bool   `json:"expired"`
 		}
-		rows := make([]invitationRow, 0, len(invites))
-		for _, inv := range invites {
-			var role roleModel
-			if err := db.Model(&roleModel{}).Find(ctx.Request.Context(), &role, inv.RoleID); err != nil {
-				ctx.Error(err)
-				return
-			}
+		rows := make([]invitationRow, len(invites))
+		for i, inv := range invites {
 			expiresAt := ""
-			expired := true
-			if inv.ExpiresAt != nil {
+			if !inv.ExpiresAt.IsZero() {
 				expiresAt = inv.ExpiresAt.Format(time.RFC3339)
-				expired = time.Now().After(*inv.ExpiresAt)
 			}
-			rows = append(rows, invitationRow{
-				UUID: inv.UUID, Name: inv.Name, Email: inv.Email, Role: role.Name,
-				ExpiresAt: expiresAt, Expired: expired,
-			})
+			rows[i] = invitationRow{
+				UUID: inv.UUID, Name: inv.Name, Email: inv.Email, Role: inv.Role,
+				ExpiresAt: expiresAt, Expired: inv.Expired,
+			}
 		}
 		ctx.JSON(http.StatusOK, rows)
 	}
@@ -186,7 +179,7 @@ func companiesInvitationsIndex(db *playsql.DB) routing.HandlerFunc {
 // companiesInvitationsResend handles POST
 // /kiosks/companies/:id/invitations/:invitationId/resend — regenerates the
 // token/expiry and re-sends the email.
-func companiesInvitationsResend(db *playsql.DB, m mailer.Mailer, appURL string) routing.HandlerFunc {
+func companiesInvitationsResend(svc *MemberService) routing.HandlerFunc {
 	return func(ctx *routing.Context) {
 		companyUUID, ok := paramUUID(ctx, "id")
 		if !ok {
@@ -197,27 +190,16 @@ func companiesInvitationsResend(db *playsql.DB, m mailer.Mailer, appURL string) 
 			return
 		}
 
-		company, err := companiesShowRow(ctx, db, companyUUID)
+		company, err := companiesShowRow(ctx, svc.db, companyUUID)
 		if err != nil {
 			ctx.Error(err)
 			return
 		}
 
-		var invite invitationModel
-		err = db.Model(&invitationModel{}).
-			WhereEq("uuid", invitationUUID).WhereEq("company_id", company.ID).WhereNull("accepted_at").
-			First(ctx.Request.Context(), &invite)
-		if err != nil {
+		if err := svc.Resend(ctx.Request.Context(), company.ID, invitationUUID); err != nil {
 			ctx.Error(err)
 			return
 		}
-
-		invite, err = createOrRefreshInvitation(ctx, db, company.ID, invite.RoleID, invite.Name, invite.Email)
-		if err != nil {
-			ctx.Error(err)
-			return
-		}
-		sendInvitationEmail(m, invite, company.Name, appURL)
 		ctx.JSON(http.StatusOK, map[string]any{"ok": true})
 	}
 }
