@@ -74,24 +74,58 @@ type PlannedFile struct {
 
 // InstallPlan is what kiosk:install would do, computed without touching disk.
 type InstallPlan struct {
+	Mode  TenancyMode
 	Files []PlannedFile
 }
 
-// PlanInstall reports what installing/updating Kiosk into root would do.
+// hostSkips are the files Host mode doesn't copy: Kiosk's own tenant,
+// membership, role and invitation tables (and migrations that alter them),
+// plus the invitation page and email. The host's own tables stand in.
+var hostSkips = map[string]bool{
+	"20260821120001_create_companies_table.yaml":              true,
+	"20260821120004_create_company_users_table.yaml":          true,
+	"20260824100000_create_roles_table.yaml":                  true,
+	"20260824100001_seed_default_roles.sql":                   true,
+	"20260824100002_add_identifier_to_companies_table.yaml":   true,
+	"20260824100003_add_role_id_to_company_users_table.yaml":  true,
+	"20260824150000_create_invitations_table.yaml":            true,
+	"20260827150000_add_theme_preset_to_companies_table.yaml": true,
+	"20260827150001_add_appearance_to_users_table.yaml":       true,
+	"AcceptInvitation.tsx":                                    true,
+	"kiosk-invitation.html":                                   true,
+	"confirm-email.html":                                      true, // Owned mode's settings screens
+}
+
+// PlanInstall reports what installing/updating Kiosk into root would do,
+// in the mode recorded in root's .kiosk-lock (Owned when there's none).
 func PlanInstall(root string) (*InstallPlan, error) {
 	lock, err := readLock(root)
 	if err != nil {
 		return nil, err
 	}
+	mode, err := ParseTenancyMode(lock.Mode)
+	if err != nil {
+		return nil, err
+	}
+	return PlanInstallMode(root, mode)
+}
 
-	plan := &InstallPlan{}
+// PlanInstallMode is PlanInstall for an explicit mode (kiosk:install
+// --mode host). Host mode leaves out hostSkips.
+func PlanInstallMode(root string, mode TenancyMode) (*InstallPlan, error) {
+	lock, err := readLock(root)
+	if err != nil {
+		return nil, err
+	}
+
+	plan := &InstallPlan{Mode: mode}
 	for _, src := range sources {
 		entries, err := fs.ReadDir(src.fsys, src.srcDir)
 		if err != nil {
 			return nil, err
 		}
 		for _, entry := range entries {
-			if entry.IsDir() {
+			if entry.IsDir() || (mode == Host && hostSkips[entry.Name()]) {
 				continue
 			}
 			data, err := fs.ReadFile(src.fsys, filepath.Join(src.srcDir, entry.Name()))
@@ -148,6 +182,10 @@ func ApplyInstall(root string, plan *InstallPlan, skip map[string]bool) (*Lock, 
 		return nil, err
 	}
 	lock.KioskVersion = moduleVersion()
+	lock.Mode = ""
+	if plan.Mode == Host {
+		lock.Mode = plan.Mode.String()
+	}
 
 	for _, pf := range plan.Files {
 		if skip[pf.Path] {

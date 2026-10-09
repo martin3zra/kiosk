@@ -1,5 +1,5 @@
 import { router } from "@inertiajs/react";
-import { type FormEvent, useEffect, useState } from "react";
+import { createContext, type FormEvent, useContext, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,8 @@ interface CompanyRow {
   name: string;
   status: string;
   plan: string;
+  // Host mode only.
+  plan_id?: number | null;
 }
 
 interface Member {
@@ -40,10 +42,23 @@ interface Role {
   Description: string | null;
 }
 
+// Set only in Host mode (Options.Tenancy): companies are the host's own
+// tenants, created in the host app, with an Admin/Member flag for roles.
+interface HostProps {
+  create_url: string;
+  home_url: string;
+  can_invite: boolean;
+  can_suspend: boolean;
+  plans: { id: number; name: string; code: string | null }[];
+}
+
 interface DashboardProps {
   stats: { companies: number; plans: number; users: number };
   companies: CompanyRow[];
+  host?: HostProps;
 }
+
+const HostContext = createContext<HostProps | undefined>(undefined);
 
 // Kiosk's endpoints are a plain JSON API, not Inertia-rendered responses —
 // every mutation here goes through fetch() + useCsrfHeaders(), not
@@ -55,7 +70,7 @@ interface DashboardProps {
 // panics outside a browser-form submission (see roles.go's package doc /
 // the kiosk repo's TestCompaniesCreateRequiresOwner for the full story).
 // Centralized here once rather than on every call site below.
-export default function Dashboard({ stats, companies }: DashboardProps) {
+export default function Dashboard({ stats, companies, host }: DashboardProps) {
   const headers = { ...useCsrfHeaders(), Accept: "application/json" };
   const [roles, setRoles] = useState<Role[]>([]);
 
@@ -69,26 +84,41 @@ export default function Dashboard({ stats, companies }: DashboardProps) {
   }, []);
 
   return (
-    <KioskLayout title="Dashboard">
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Companies" value={stats.companies} />
-        <StatCard label="Plans" value={stats.plans} />
-        <StatCard label="Users" value={stats.users} />
-      </div>
+    <HostContext.Provider value={host}>
+      <KioskLayout title="Dashboard">
+        <div className="grid gap-4 sm:grid-cols-3">
+          <StatCard label="Companies" value={stats.companies} />
+          <StatCard label="Plans" value={stats.plans} />
+          <StatCard label="Users" value={stats.users} />
+        </div>
 
-      <NewCompanyForm headers={headers} />
-
-      <div className="mt-6 space-y-3">
-        {companies.map((c) => (
-          <CompanyCard key={c.uuid} company={c} headers={headers} roles={roles} />
-        ))}
-        {companies.length === 0 && (
-          <p className="text-muted-foreground py-6 text-center text-sm">
-            No companies yet.
-          </p>
+        {host ? (
+          host.create_url && (
+            <div className="mt-6 flex items-center justify-between rounded-md border p-4 text-sm">
+              <span className="text-muted-foreground">
+                Companies are created in the app.
+              </span>
+              <a href={host.create_url} className="font-medium underline underline-offset-4">
+                New company
+              </a>
+            </div>
+          )
+        ) : (
+          <NewCompanyForm headers={headers} />
         )}
-      </div>
-    </KioskLayout>
+
+        <div className="mt-6 space-y-3">
+          {companies.map((c) => (
+            <CompanyCard key={c.uuid} company={c} headers={headers} roles={roles} />
+          ))}
+          {companies.length === 0 && (
+            <p className="text-muted-foreground py-6 text-center text-sm">
+              No companies yet.
+            </p>
+          )}
+        </div>
+      </KioskLayout>
+    </HostContext.Provider>
   );
 }
 
@@ -273,6 +303,7 @@ function CompanyCard({
 
       {expanded && (
         <div className="border-t px-4 py-3">
+          <HostCompanyControls company={company} headers={headers} />
           {loading && (
             <p className="text-muted-foreground text-sm">Loading…</p>
           )}
@@ -289,6 +320,74 @@ function CompanyCard({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Suspend/reactivate and the plan picker, Host mode only.
+function HostCompanyControls({
+  company,
+  headers,
+}: {
+  company: CompanyRow;
+  headers: Record<string, string>;
+}) {
+  const host = useContext(HostContext);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!host) return null;
+
+  async function put(path: string, body: object) {
+    setBusy(true);
+    setError(null);
+    const res = await fetch(`/kiosks/companies/${company.uuid}/${path}`, {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      setError(b.error ?? "Could not save.");
+      return;
+    }
+    router.reload({ only: ["companies"] });
+  }
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-3">
+      {host.can_suspend && (
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          disabled={busy}
+          onClick={() =>
+            put("status", { status: company.status === "active" ? "suspended" : "active" })
+          }
+        >
+          {company.status === "active" ? "Suspend" : "Reactivate"}
+        </Button>
+      )}
+      {host.plans.length > 0 && (
+        <select
+          aria-label="Plan"
+          value={company.plan_id ?? ""}
+          disabled={busy}
+          onChange={(e) => e.target.value && put("plan", { plan_id: Number(e.target.value) })}
+          className="h-7 rounded-md border border-input bg-transparent px-2 text-xs dark:bg-input/30"
+        >
+          <option value="" disabled>
+            No plan
+          </option>
+          {host.plans.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      )}
+      {error && <span className="text-destructive text-xs">{error}</span>}
     </div>
   );
 }
@@ -430,8 +529,26 @@ function MemberRow({
   headers: Record<string, string>;
   onChange: () => void;
 }) {
+  const host = useContext(HostContext);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function setRole(role: string) {
+    setBusy(true);
+    setError(null);
+    const res = await fetch(`/kiosks/companies/${company.uuid}/users/${member.uuid}`, {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ role }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error ?? "Could not change the role.");
+      return;
+    }
+    onChange();
+  }
 
   async function impersonate() {
     setBusy(true);
@@ -450,16 +567,21 @@ function MemberRow({
     // just changed underneath this session, so every prop (auth.user,
     // permissions, ...) needs a fresh full-page load, not a client-side
     // partial reload that could keep stale assumptions around.
-    window.location.assign("/home");
+    window.location.assign(host?.home_url ?? "/home");
   }
 
   async function remove() {
     setBusy(true);
-    await fetch(`/kiosks/companies/${company.uuid}/users/${member.uuid}`, {
+    const res = await fetch(`/kiosks/companies/${company.uuid}/users/${member.uuid}`, {
       method: "DELETE",
       headers,
     });
     setBusy(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error ?? "Could not remove the member.");
+      return;
+    }
     onChange();
   }
 
@@ -470,6 +592,17 @@ function MemberRow({
       <td className="text-muted-foreground">{member.role}</td>
       <td className="py-2 text-right">
         <div className="flex justify-end gap-2">
+          {host && (
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => setRole(member.role === "admin" ? "member" : "admin")}
+            >
+              {member.role === "admin" ? "Make member" : "Make admin"}
+            </Button>
+          )}
           <Button
             type="button"
             size="xs"

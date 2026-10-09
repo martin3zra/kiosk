@@ -24,8 +24,11 @@ type LockedFile struct {
 // Lock is the on-disk shape of .kiosk-lock — plain JSON, per the technical
 // spec: which Kiosk version wrote each file, and that file's hash.
 type Lock struct {
-	KioskVersion string       `json:"kiosk_version"`
-	Files        []LockedFile `json:"files"`
+	KioskVersion string `json:"kiosk_version"`
+	// Mode is the tenancy mode the files were installed for ("host"), or
+	// empty for Owned — so kiosk:update keeps copying the same set.
+	Mode  string       `json:"mode,omitempty"`
+	Files []LockedFile `json:"files"`
 }
 
 func readLock(root string) (*Lock, error) {

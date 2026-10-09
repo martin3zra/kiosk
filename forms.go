@@ -51,6 +51,7 @@ type planForm struct {
 	PriceCents int64   `json:"price_cents"`
 	Currency   string  `json:"currency"`
 	Limits     *string `json:"limits"`
+	Code       *string `json:"code"`
 }
 
 func (f *planForm) Rules() map[string]any {

@@ -65,7 +65,13 @@ func PlanUninstall(ctx context.Context, root string, db *playsql.DB) (*Uninstall
 		{"impersonation_sessions", func(ctx context.Context) (int64, error) { return db.Model(&impersonationSessionModel{}).Count(ctx) }},
 		{"invitations", func(ctx context.Context) (int64, error) { return db.Model(&invitationModel{}).Count(ctx) }},
 	}
+	// Host mode never created companies, company_users or invitations —
+	// the host's own tables stand in, and Kiosk mustn't count those.
+	hostTables := map[string]bool{"companies": true, "company_users": true, "invitations": true}
 	for _, c := range counters {
+		if lock.Mode == Host.String() && hostTables[c.table] {
+			continue
+		}
 		count, err := c.count(ctx)
 		if err != nil {
 			return nil, err

@@ -1,0 +1,19 @@
+up:
+  plan:
+    action: alter
+    table: plans
+    add_columns:
+      code: string:40 nullable
+    add_indexes:
+      - name: plans_code_uq
+        columns: [code]
+        unique: true
+
+down:
+  plan:
+    action: alter
+    table: plans
+    drop_indexes:
+      - plans_code_uq
+    drop_columns:
+      - code

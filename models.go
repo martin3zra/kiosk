@@ -22,14 +22,17 @@ func (companyModel) TableName() string { return "companies" }
 
 // planModel is the on-disk shape of a row in plans.
 type planModel struct {
-	ID         int        `db:"id"`
-	UUID       string     `db:"uuid"`
-	Name       string     `db:"name"`
-	PriceCents int64      `db:"price_cents"`
-	Currency   string     `db:"currency"`
-	Limits     *string    `db:"limits"` // raw JSON, unmarshaled by callers that need it
-	CreatedAt  *time.Time `db:"created_at"`
-	UpdatedAt  *time.Time `db:"updated_at"`
+	ID         int     `db:"id"`
+	UUID       string  `db:"uuid"`
+	Name       string  `db:"name"`
+	PriceCents int64   `db:"price_cents"`
+	Currency   string  `db:"currency"`
+	Limits     *string `db:"limits"` // raw JSON, unmarshaled by callers that need it
+	// Code is an optional stable key a host's code can branch on (e.g.
+	// "hosted"), where Name is free to change. Unique when set.
+	Code      *string    `db:"code"`
+	CreatedAt *time.Time `db:"created_at"`
+	UpdatedAt *time.Time `db:"updated_at"`
 }
 
 func (planModel) TableName() string { return "plans" }

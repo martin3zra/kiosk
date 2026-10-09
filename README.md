@@ -121,6 +121,61 @@ An empty `Allowlist` locks everyone out but the routes still exist (they 404 per
 
 Rejections render as **404, not 403** — an unlisted authenticated user can't tell `/kiosks` exists.
 
+## Tenancy: Kiosk's companies or the host's
+
+By default (`Tenancy.Mode` = `kiosk.Owned`) Kiosk keeps its own
+`companies`, `company_users`, `roles` and `invitations`, as described
+everywhere else in this README.
+
+An app that already has its own tenants (Promptly's workspaces) uses
+**Host mode**: Kiosk reads and writes the host's tenant and membership tables
+through a mapping of table and column names. It still queries them directly
+through playsql. The mapping only names things, and each name must be a plain
+lowercase identifier.
+
+```go
+kiosk.Register(s.route, kiosk.Options{
+	DB:         s.play,
+	Middleware: []routing.Middleware{s.AuthenticatedMiddleware},
+	Allowlist:  s.config.kiosk.Developers,
+	HomeURL:    "/",
+	Tenancy: kiosk.Tenancy{
+		Mode:    kiosk.Host,
+		Tenants: kiosk.TenantTable{Table: "workspaces", Key: "slug", Name: "name", Status: "status", PlanID: "plan_id"},
+		Members: kiosk.MemberTable{Table: "workspace_members", TenantID: "workspace_id", UserID: "user_id", AdminColumn: "is_admin"},
+		CreateURL:    "/platform/invites",           // "New company" links here
+		InviteMember: s.kioskInviteMember,          // "Add member" runs the host's own invite
+		IsDeveloper:  func(u map[string]any) bool { return u["role"] == "developer" },
+	},
+})
+```
+
+| | Owned | Host |
+|---|---|---|
+| Companies | `companies` | `Tenants.Table`, addressed by `Tenants.Key` in `/kiosks/companies/:id` |
+| Create | Kiosk's form | a link to `CreateURL` (`POST /kiosks/companies` answers 405) |
+| Status, plan | `companies` columns | `Tenants.Status`, `Tenants.PlanID` (leave either empty to hide it) |
+| Members | `company_users` + `roles` | `Members.Table`, shown as Admin/Member from `AdminColumn`. Kiosk refuses to demote or remove the last admin. `PUT /kiosks/companies/:id/users/:userId` changes the role. |
+| Add member | Kiosk's invitation | `InviteMember`, or the existing member's role is set |
+| Invitations | Kiosk's own | not mounted: the host lists its own |
+| One company per user | yes | no |
+| Impersonation | sets `company_id` | leaves it unset; the host picks the tenant |
+
+**Developers.** `IsDeveloper`, when it's set, must pass as well as the
+allowlist for `/kiosks`. Impersonation refuses a target that passes
+*either* test.
+
+**Install.** `kiosk:install --mode host` copies only what Host mode uses:
+plans, addons, `company_addons`, `impersonation_sessions`, `plans.code` and the
+dashboard. It records the mode in `.kiosk-lock`, so `kiosk:update` keeps it.
+`company_addons.company_id` then holds the host's tenant id. Add the foreign
+key to your tenant table in your own migration, since Kiosk's migration can't
+name it.
+
+**Plans.** `plans.code` (nullable, unique) is a stable key a host's code can
+branch on (`"hosted"`) while the plan's name stays free to change. Both
+`POST` and `PUT` on `/kiosks/plans` accept `code`.
+
 ## What it exposes
 
 | Method | Path | Purpose |

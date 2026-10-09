@@ -9,12 +9,10 @@ package kiosk
 
 import (
 	"context"
-	"net/http"
 	"strings"
 
 	"github.com/martin3zra/forge/auth"
 	"github.com/martin3zra/forge/events"
-	"github.com/martin3zra/forge/foundation"
 	"github.com/martin3zra/forge/mailer"
 	"github.com/martin3zra/forge/routing"
 	"github.com/martin3zra/playsql"
@@ -58,11 +56,47 @@ type Options struct {
 	// location, seed catalog rows). Build it with events.NewDispatcher, wire
 	// listeners with events.On (see events.go); nil disables dispatch.
 	Events *events.Dispatcher[*playsql.Tx]
+
+	// Tenancy picks where companies live: Kiosk's own tables (Owned, the
+	// zero value and the behavior before this option existed) or the
+	// host's tenant table through a mapping (Host). See tenancy.go.
+	Tenancy Tenancy
+
+	// HomeURL is where the dashboard sends a developer after they start
+	// impersonating someone. Empty means "/home".
+	HomeURL string
+}
+
+func (o Options) homeURL() string {
+	if o.HomeURL == "" {
+		return "/home"
+	}
+	return o.HomeURL
 }
 
 // Register mounts Kiosk's routes on router at /kiosks.
+//
+// In Host mode (Options.Tenancy) the company and member routes read the
+// host's own tables, "New company" defers to the host, and Kiosk's own
+// invitation routes aren't mounted; plans, addons, users and impersonation
+// are the same in both modes. Register panics on an invalid Host mapping.
 func Register(router *routing.Router, opts Options) {
-	mws := append(append([]routing.Middleware{}, opts.Middleware...), allowlistMiddleware(opts.Allowlist))
+	dev := developerCheck{allowlist: opts.Allowlist, isDeveloper: opts.Tenancy.IsDeveloper}
+	mws := append(append([]routing.Middleware{}, opts.Middleware...), developerMiddleware(dev))
+
+	if opts.Tenancy.Mode == Host {
+		host := newHostKiosk(opts)
+		router.GroupPrefix("/kiosks", func(rg *routing.Router) {
+			rg.GroupWithMiddleware(mws, func(rg2 *routing.Router) {
+				host.register(rg2)
+				registerShared(rg2, opts, dev, false)
+			})
+			rg.GroupWithMiddleware(opts.Middleware, func(rg2 *routing.Router) {
+				rg2.DELETE("/impersonate", impersonateStop(opts.DB))
+			})
+		})
+		return
+	}
 
 	router.GroupPrefix("/kiosks", func(rg *routing.Router) {
 		rg.GroupWithMiddleware(mws, func(rg2 *routing.Router) {
@@ -85,20 +119,10 @@ func Register(router *routing.Router, opts Options) {
 			rg2.GET("/companies/:id/invitations", companiesInvitationsIndex(members))
 			rg2.POST("/companies/:id/invitations/:invitationId/resend", companiesInvitationsResend(members))
 
-			rg2.GET("/plans", plansIndex(opts.DB))
-			rg2.POST("/plans", plansCreate(opts.DB))
-			rg2.PUT("/plans/:id", plansUpdate(opts.DB))
-
-			rg2.GET("/addons", addonsIndex(opts.DB))
-			rg2.POST("/addons", addonsCreate(opts.DB))
 			rg2.POST("/companies/:id/addons", companiesAttachAddon(opts.DB))
 			rg2.DELETE("/companies/:id/addons/:addonId", companiesDetachAddon(opts.DB))
 
-			rg2.GET("/users", usersIndex(opts.DB))
-			rg2.POST("/users", usersCreate(opts.DB))
-			rg2.PUT("/users/:id", usersUpdate(opts.DB))
-
-			rg2.POST("/impersonate/:id", impersonateStart(opts.DB, opts.Allowlist))
+			registerShared(rg2, opts, dev, true)
 		})
 
 		// impersonateStop is deliberately NOT behind allowlistMiddleware: by
@@ -123,6 +147,24 @@ func Register(router *routing.Router, opts Options) {
 			rg2.POST("/invitations/:token", invitationsAccept(opts.DB))
 		})
 	})
+}
+
+// registerShared mounts the routes that work the same in both modes.
+// seedCompany is Owned mode's "set company_id from company_users on
+// impersonate"; Host mode leaves picking a tenant to the host.
+func registerShared(rg *routing.Router, opts Options, dev developerCheck, seedCompany bool) {
+	rg.GET("/plans", plansIndex(opts.DB))
+	rg.POST("/plans", plansCreate(opts.DB))
+	rg.PUT("/plans/:id", plansUpdate(opts.DB))
+
+	rg.GET("/addons", addonsIndex(opts.DB))
+	rg.POST("/addons", addonsCreate(opts.DB))
+
+	rg.GET("/users", usersIndex(opts.DB))
+	rg.POST("/users", usersCreate(opts.DB))
+	rg.PUT("/users/:id", usersUpdate(opts.DB))
+
+	rg.POST("/impersonate/:id", impersonateStartWith(opts.DB, dev, seedCompany))
 }
 
 // dashboardHandler renders Kiosk/Dashboard.tsx: company/plan/user counts and
@@ -185,11 +227,18 @@ func dashboardHandler(db *playsql.DB) routing.HandlerFunc {
 // rejection renders as 404, not 403, so an unlisted authenticated user can't
 // tell /kiosks exists at all.
 func allowlistMiddleware(allowlist map[string]bool) routing.Middleware {
+	return developerMiddleware(developerCheck{allowlist: allowlist})
+}
+
+// developerMiddleware lets through only developers: listed in the allowlist
+// and, when the host set Tenancy.IsDeveloper, passing that too. Rejections
+// are 404s, like a URL that doesn't exist.
+func developerMiddleware(dev developerCheck) routing.Middleware {
 	return func(next routing.HandlerFunc) routing.HandlerFunc {
 		return func(ctx *routing.Context) {
-			email := currentIdentifier(ctx.Request.Context())
-			if email == "" || !allowlist[email] {
-				ctx.Error(foundation.HTTPError{StatusCode: http.StatusNotFound, Message: "Not Found"})
+			user, _ := ctx.Request.Context().Value(auth.ContextUserID{}).(map[string]any)
+			if !dev.check(user, currentIdentifier(ctx.Request.Context())) {
+				notFound(ctx)
 				return
 			}
 			next(ctx)

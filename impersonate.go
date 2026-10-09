@@ -2,7 +2,6 @@ package kiosk
 
 import (
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/martin3zra/forge/routing"
@@ -27,6 +26,13 @@ const ImpersonateSessionKey = "kiosk_original_user_id"
 // host app; Kiosk itself has no opinion on what a developer without a
 // company_id is allowed to view).
 func impersonateStart(db *playsql.DB, allowlist map[string]bool) routing.HandlerFunc {
+	return impersonateStartWith(db, developerCheck{allowlist: allowlist}, true)
+}
+
+// impersonateStartWith is impersonateStart with the full developer check
+// (allowlist plus Tenancy.IsDeveloper) for the target guard. seedCompany
+// false (Host mode) leaves company_id unset: the host picks the tenant.
+func impersonateStartWith(db *playsql.DB, dev developerCheck, seedCompany bool) routing.HandlerFunc {
 	return func(ctx *routing.Context) {
 		targetUUID, ok := paramUUID(ctx, "id")
 		if !ok {
@@ -53,7 +59,7 @@ func impersonateStart(db *playsql.DB, allowlist map[string]bool) routing.Handler
 			return
 		}
 
-		if allowlist[strings.ToLower(target.Email)] {
+		if dev.target(target) {
 			ctx.JSON(http.StatusForbidden, map[string]any{"error": "cannot impersonate another kiosk developer"})
 			return
 		}
@@ -78,7 +84,10 @@ func impersonateStart(db *playsql.DB, allowlist map[string]bool) routing.Handler
 		// impersonated. Not an error: assigning them to a company is a
 		// separate step (see companiesAttachUser).
 		var membership companyUserModel
-		companyErr := db.Model(&companyUserModel{}).WhereEq("user_id", target.ID).First(ctx.Request.Context(), &membership)
+		companyErr := playsql.ErrNotFound
+		if seedCompany {
+			companyErr = db.Model(&companyUserModel{}).WhereEq("user_id", target.ID).First(ctx.Request.Context(), &membership)
+		}
 
 		sess.Put(ImpersonateSessionKey, actorID)
 		sess.Put("user_id", target.ID)
