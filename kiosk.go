@@ -20,6 +20,9 @@ import (
 
 // Options configures a Register call.
 type Options struct {
+	// PendingApprovals optionally supplies a catalog approval notice for the Kiosk panel.
+	PendingApprovals PendingApprovals
+
 	// DB is the host app's playsql connection. Kiosk queries its own
 	// tables (companies, plans, addons, company_addons, company_users)
 	// and the host's users table directly through it — no adapter
@@ -82,7 +85,7 @@ func (o Options) homeURL() string {
 // are the same in both modes. Register panics on an invalid Host mapping.
 func Register(router *routing.Router, opts Options) {
 	dev := developerCheck{allowlist: opts.Allowlist, isDeveloper: opts.Tenancy.IsDeveloper}
-	mws := append(append([]routing.Middleware{}, opts.Middleware...), developerMiddleware(dev))
+	mws := append(append([]routing.Middleware{}, opts.Middleware...), developerMiddleware(dev), approvalNoticeMiddleware(opts.PendingApprovals))
 
 	if opts.Tenancy.Mode == Host {
 		host := newHostKiosk(opts)

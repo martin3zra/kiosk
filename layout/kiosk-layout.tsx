@@ -12,7 +12,9 @@ export default function KioskLayout({
   title,
   children,
 }: PropsWithChildren<{ title: string }>) {
-  const { auth } = usePage<SharedProps>().props;
+  const { auth, kioskPendingApprovals } = usePage<SharedProps & {
+    kioskPendingApprovals?: { count: number; url: string; label: string };
+  }>().props;
   const headers = useCsrfHeaders();
 
   return (
@@ -29,6 +31,11 @@ export default function KioskLayout({
             </Link>
           </nav>
           <div className="ml-auto flex items-center gap-4 text-xs text-neutral-400">
+            {kioskPendingApprovals && kioskPendingApprovals.count > 0 && (
+              <Link href={kioskPendingApprovals.url} className="rounded bg-amber-500 px-2 py-1 text-neutral-950">
+                {kioskPendingApprovals.label} ({kioskPendingApprovals.count})
+              </Link>
+            )}
             {/* /home redirects developers straight back here unless they're
                 impersonating (see spark's RedirectDeveloperToKiosk) — only
                 show this link when it would actually go somewhere. */}

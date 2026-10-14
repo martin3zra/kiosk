@@ -1,6 +1,7 @@
 package kiosk
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -17,6 +18,8 @@ import (
 // (does the *current* identity have a company) than "is this session
 // currently impersonating."
 const ImpersonateSessionKey = "kiosk_original_user_id"
+
+const impersonateAuditSessionKey = "kiosk_impersonation_session_id"
 
 // impersonateStart handles POST /kiosks/impersonate/:id. Besides swapping
 // the session identity, it opens an impersonation_sessions audit row and
@@ -89,6 +92,7 @@ func impersonateStartWith(db *playsql.DB, dev developerCheck, seedCompany bool) 
 			companyErr = db.Model(&companyUserModel{}).WhereEq("user_id", target.ID).First(ctx.Request.Context(), &membership)
 		}
 
+		sess.Put(impersonateAuditSessionKey, auditRow.ID)
 		sess.Put(ImpersonateSessionKey, actorID)
 		sess.Put("user_id", target.ID)
 		sess.Put("user", sessionUserPayload(target))
@@ -121,11 +125,7 @@ func impersonateStop(db *playsql.DB) routing.HandlerFunc {
 			return
 		}
 
-		_, err := db.Model(&impersonationSessionModel{}).
-			WhereEq("developer_user_id", originalID).
-			WhereNull("ended_at").
-			Update(ctx.Request.Context(), map[string]any{"ended_at": time.Now()})
-		if err != nil {
+		if err := EndImpersonation(ctx.Request, db); err != nil {
 			ctx.Error(err)
 			return
 		}
@@ -172,4 +172,35 @@ func toInt(v any) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// EndImpersonation closes the current session's audit row and removes its
+// impersonation and company markers. Hosts must call it before invalidating
+// the session on logout. It is a no-op outside impersonation; it does not
+// restore the developer identity (logout must still invalidate the session).
+func EndImpersonation(r *http.Request, db *playsql.DB) error {
+	sess := session.GetSession(r)
+	originalID, ok := toInt(sess.Get(ImpersonateSessionKey))
+	if !ok {
+		return nil
+	}
+	query := db.Model(&impersonationSessionModel{}).
+		WhereEq("developer_user_id", originalID).WhereNull("ended_at")
+	if auditID, ok := toInt(sess.Get(impersonateAuditSessionKey)); ok {
+		query = query.WhereEq("id", auditID)
+	} else {
+		// Sessions started before audit IDs were stored use the target too.
+		targetID, ok := toInt(sess.Get("user_id"))
+		if !ok {
+			return fmt.Errorf("kiosk: impersonation session has no target user")
+		}
+		query = query.WhereEq("target_user_id", targetID)
+	}
+	if _, err := query.Update(r.Context(), map[string]any{"ended_at": time.Now()}); err != nil {
+		return err
+	}
+	sess.Delete(ImpersonateSessionKey)
+	sess.Delete(impersonateAuditSessionKey)
+	sess.Delete("company_id")
+	return nil
 }

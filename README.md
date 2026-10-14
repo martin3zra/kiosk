@@ -284,12 +284,46 @@ New users get a random password and `must_change_password: true` — there's no 
 ### Impersonation
 
 ```http
-POST /kiosks/impersonate/42
+POST /kiosks/impersonate/<user-uuid>
 ```
 
-Swaps the current session to user 42, stashing the original id so `DELETE /kiosks/impersonate` can restore it. Session-only for v1 — no audit table. A developer can't impersonate another allow-listed developer, and impersonation sessions don't stack (start a second one without stopping the first and you get `409 Conflict`).
+Swaps the current session to the target user, stashing the original developer id and audit row id so `DELETE /kiosks/impersonate` can restore the developer and close the audit row. Each start creates an `impersonation_sessions` audit row; ending one session does not close another session’s row. A developer can't impersonate another allow-listed developer, and impersonation sessions don't stack (start a second one without stopping the first and you get `409 Conflict`).
 
 If you're embedding Kiosk in another forge app: the session value it writes on impersonate (and expects your app's own auth layer to read back) is a `map[string]any` keyed by your `Authenticatable`'s JSON field names — not a Go struct. Sessions round-trip through a DB-backed store as JSON between requests, so this is the shape your app's own session-to-identity decoder needs to already handle.
+
+Hosts must call `kiosk.EndImpersonation(ctx.Request, db)` **before** invalidating
+an authenticated session on logout. Return an error if cleanup fails, then
+invalidate as usual. This closes the audit row and clears impersonation/company
+markers without restoring the developer's login. It is safe to call for normal
+logouts and repeatedly. Spark's `kiosk:install` wires this into fresh and
+previously installed applications; custom logout handlers need the same call.
+Existing sessions without an audit id are closed by developer and target id.
+Closing a browser tab alone does not perform logout or end a server session.
+
+### Pending catalog approvals
+
+Catalog data belongs to the host application. Set `Options.PendingApprovals` to
+query the current pending count and return a `kiosk.PendingApprovalNotice`:
+
+```go
+PendingApprovals: func(ctx context.Context) (kiosk.PendingApprovalNotice, error) {
+    count, err := pendingCatalogApprovalCount(ctx) // host-owned query
+    return kiosk.PendingApprovalNotice{
+        Count: count,
+        URL:   "/platform/catalog",
+        Label: "Catálogo pendiente de aprobación",
+    }, err
+},
+```
+
+Kiosk shows the count and a link in its panel header when the count is positive.
+A zero count hides the badge. The callback runs after developer authorization in
+both Owned and Host modes; it does not run for the impersonation-stop or public
+invitation routes. The count refreshes on Kiosk page requests, not by polling.
+Use a trusted local URL and the host's translated label. Callback errors fail the
+request instead of presenting a misleading empty queue. This is an in-panel
+notification; no catalog email is sent. Upgrade the Kiosk module and run
+`kiosk:install` to copy the updated layout into existing apps.
 
 ## Data model
 
