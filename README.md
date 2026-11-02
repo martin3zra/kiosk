@@ -398,3 +398,10 @@ go test ./...
 ```
 
 Handler tests exercise real HTTP request/response cycles via `httptest` against an in-memory sqlite database (schema matches what `camel` would create from `migrations/*.yaml` — verified against that YAML with `camel plan` while building it, not just assumed). Install/uninstall tests run against real temp directories on disk, covering fresh installs, idempotent re-runs, adopting pre-existing byte-identical files, conflicting with untracked files, and detecting local edits.
+
+## Existing membership tables and transaction-owned policy
+
+The optional `MembershipService` supports existing membership tables, full named
+roles/permissions, retained revoked records and explicitly configured reactivation.
+It uses a caller-supplied transaction-bound `MembershipStore`; it does not change
+legacy Host/Owned routes or `MemberService`. See [the opt-in API and upgrade guide](MEMBERSHIP-UPGRADE.md).
