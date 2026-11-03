@@ -1,4 +1,4 @@
-# Opt-in membership service (unreleased)
+# Opt-in membership service (v0.8.0)
 
 Existing `Register`, `Tenancy`, Host mappings and `MemberService` require no
 changes. Owned removal still hard-deletes; Host still resolves its boolean to
